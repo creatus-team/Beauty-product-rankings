@@ -401,6 +401,24 @@ select.fs:focus{border-color:var(--pink);background:#fff}
 .ys-pill:hover{border-color:var(--pink);color:var(--pink)}
 .ys-pill.active{background:var(--pink);border-color:var(--pink);color:#fff}
 
+/* Chart view */
+.chart-wrap{padding:24px;max-width:960px;margin:0 auto}
+.chart-title{font-size:1.05rem;font-weight:800;color:var(--pink);margin-bottom:16px}
+.chart-platform-filter{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:24px}
+.ch-pill{padding:7px 16px;border-radius:20px;border:1.5px solid var(--border);
+  background:var(--bg);color:var(--muted);font-size:.82rem;font-weight:600;
+  cursor:pointer;transition:all .18s;white-space:nowrap}
+.ch-pill:hover{border-color:var(--pink);color:var(--pink)}
+.ch-pill.active{background:var(--pink);border-color:var(--pink);color:#fff}
+.chart-body{display:flex;gap:36px;align-items:center;flex-wrap:wrap;justify-content:center;padding:8px 0}
+.chart-legend{display:flex;flex-direction:column;gap:6px;min-width:180px}
+.legend-item{display:flex;align-items:center;gap:8px;font-size:.82rem;padding:4px 6px;border-radius:7px;transition:background .15s}
+.legend-item:hover{background:var(--pink-light)}
+.legend-dot{width:13px;height:13px;border-radius:3px;flex-shrink:0}
+.legend-label{flex:1;font-weight:600;color:var(--text)}
+.legend-pct{font-weight:800;color:var(--pink);min-width:38px;text-align:right}
+.legend-cnt{color:var(--muted);font-size:.72rem}
+
 /* loading */
 #loading{position:fixed;inset:0;background:rgba(253,246,248,.92);
   display:flex;flex-direction:column;align-items:center;justify-content:center;
@@ -459,8 +477,8 @@ select.fs:focus{border-color:var(--pink);background:#fff}
 let all = [], country = 'DB', ysSub = 'All Beauty';
 
 // country order: ALL first, then US, UK, JP, then others
-const ORDER = ['DB','ALL','US','UK','JP','YS','AX','DE','FR','CA','AU','IT','ES'];
-const TAB_LABELS = {'DB':'📊 대시보드','ALL':'전체','YS':'YesStyle','AX':'AliExpress'};
+const ORDER = ['DB','CH','ALL','US','UK','JP','YS','AX','DE','FR','CA','AU','IT','ES'];
+const TAB_LABELS = {'DB':'📊 대시보드','CH':'📈 카테고리 분석','ALL':'전체','YS':'YesStyle','AX':'AliExpress'};
 
 async function loadData() {
   show('랭킹 데이터 불러오는 중...');
@@ -522,7 +540,7 @@ function buildTabs() {
     const label = TAB_LABELS[code] || code;
     const btn = document.createElement('button');
     btn.className = 'ctab' + (code===country ? ' active' : '');
-    const cntHtml = code==='DB' ? '' : `<span class="cnt">${counts[code]||0}</span>`;
+    const cntHtml = (code==='DB'||code==='CH') ? '' : `<span class="cnt">${counts[code]||0}</span>`;
     btn.innerHTML = (flag ? `<span class="flag">${flag}</span>` : '') + label + cntHtml;
     btn.onclick = () => { country=code; ysSub='All Beauty'; resetYsPills(); buildTabs(); render(); };
     el.appendChild(btn);
@@ -625,6 +643,11 @@ function render() {
     document.getElementById('gw').innerHTML = renderDashboard();
     return;
   }
+  if (country === 'CH') {
+    toolbar.style.display = 'none';
+    renderChart();
+    return;
+  }
   toolbar.style.display = '';
   const items = getFiltered();
   document.getElementById('rc').textContent = items.length+'개 제품';
@@ -662,6 +685,123 @@ function render() {
     html+='</div></div>';
   }
   wrap.innerHTML=html;
+}
+
+// ── Chart ─────────────────────────────────────────────────────────────────────
+let chPlatform = 'ALL';
+const PIE_COLORS = ['#e8637a','#f5a623','#7c6fe0','#3bb89e','#54b8f7','#f76c8a','#a78bfa','#f97316','#10b981','#ec4899','#8b5cf6','#06b6d4','#84cc16'];
+
+function normalizeCategory(item) {
+  if (item._country_code === 'YS') {
+    const sub = item._ys_subcategory || '';
+    if (sub === 'Skin Care') return '스킨케어';
+    if (sub === 'Makeup') return '메이크업';
+    return '뷰티 종합';
+  }
+  if (item._country_code === 'AX') {
+    const n = (item.name||'').toLowerCase();
+    if (/serum|toner|moistur|cream|mask|essence|sunscreen|spf/.test(n)) return '스킨케어';
+    if (/mascara|foundation|lip|eyeliner|blush|bb|cc/.test(n)) return '메이크업';
+    if (/shampoo|conditioner|hair/.test(n)) return '헤어케어';
+    return '뷰티 종합';
+  }
+  const cat = (item.categoryName||'') + ' ' + (item.categoryFullName||'');
+  const c = cat.toLowerCase();
+  if (/sun.?screen|sun.?block|spf|uv\s*pro/.test(c)) return '선케어';
+  if (/moistur|serum|toner|essence|cleanser|face.?wash|exfoliant|eye.?cream|mask|pore|acne|vitamin|niacinamide|retinol|skin.?care|brightening|anti.?aging/.test(c)) return '스킨케어';
+  if (/makeup|foundation|bb.?cream|cc.?cream|mascara|eyeliner|blush|bronzer|eyeshadow|concealer|contour/.test(c)) return '메이크업';
+  if (/lip/.test(c)) return '립케어';
+  if (/hair|shampoo|conditioner|scalp/.test(c)) return '헤어케어';
+  if (/body|hand.?cream|foot|bath|shower/.test(c)) return '바디케어';
+  if (/perfume|fragrance|cologne/.test(c)) return '향수';
+  if (/nail/.test(c)) return '네일';
+  return '기타';
+}
+
+function drawChartForPlatform(code) {
+  const items = code==='ALL' ? all : all.filter(i=>i._country_code===code);
+  const catCounts = {};
+  items.forEach(item => { const k=normalizeCategory(item); catCounts[k]=(catCounts[k]||0)+1; });
+  const sorted = Object.entries(catCounts).sort((a,b)=>b[1]-a[1]);
+  const total = sorted.reduce((s,[,v])=>s+v,0);
+
+  const canvas = document.getElementById('pieChart');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W=canvas.width, H=canvas.height, cx=W/2, cy=H/2;
+  const r=Math.min(cx,cy)-20, ri=r*0.44;
+
+  let prog=0;
+  const animate = () => {
+    ctx.clearRect(0,0,W,H);
+    let angle=-Math.PI/2;
+    sorted.forEach(([,count],i) => {
+      const slice=(count/total)*2*Math.PI*Math.min(prog,1);
+      ctx.beginPath(); ctx.moveTo(cx,cy);
+      ctx.arc(cx,cy,r,angle,angle+slice);
+      ctx.closePath();
+      ctx.fillStyle=PIE_COLORS[i%PIE_COLORS.length];
+      ctx.fill();
+      ctx.strokeStyle='#fdf6f8'; ctx.lineWidth=2.5; ctx.stroke();
+      if (prog>=1 && count/total>0.04) {
+        const mid=angle+slice/2;
+        ctx.fillStyle='#fff'; ctx.font='bold 11px system-ui';
+        ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillText(Math.round(count/total*100)+'%', cx+(r*.7)*Math.cos(mid), cy+(r*.7)*Math.sin(mid));
+      }
+      angle+=slice;
+    });
+    ctx.beginPath(); ctx.arc(cx,cy,ri,0,2*Math.PI);
+    ctx.fillStyle='#fdf6f8'; ctx.fill();
+    if (prog>=1) {
+      ctx.fillStyle='#e8637a'; ctx.font='bold 22px system-ui';
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText(total, cx, cy-9);
+      ctx.fillStyle='#888'; ctx.font='11px system-ui';
+      ctx.fillText('개 제품', cx, cy+10);
+    }
+    prog+=0.045;
+    if (prog<1.05) requestAnimationFrame(animate);
+  };
+  animate();
+
+  document.getElementById('chartLegend').innerHTML = sorted.map(([cat,count],i)=>`
+    <div class="legend-item">
+      <span class="legend-dot" style="background:${PIE_COLORS[i%PIE_COLORS.length]}"></span>
+      <span class="legend-label">${cat}</span>
+      <span class="legend-pct">${Math.round(count/total*100)}%</span>
+      <span class="legend-cnt">&nbsp;(${count})</span>
+    </div>`).join('');
+}
+
+function setChPlatform(btn) {
+  document.querySelectorAll('.ch-pill').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  chPlatform=btn.dataset.code;
+  drawChartForPlatform(chPlatform);
+}
+
+function renderChart() {
+  const platforms=[
+    {code:'ALL',label:'전체'},
+    {code:'US',label:'🇺🇸 Amazon US'},
+    {code:'UK',label:'🇬🇧 Amazon UK'},
+    {code:'JP',label:'🇯🇵 Amazon JP'},
+    {code:'YS',label:'🍀 YesStyle'},
+    {code:'AX',label:'🛍️ AliExpress'},
+  ];
+  document.getElementById('gw').innerHTML=`
+    <div class="chart-wrap">
+      <div class="chart-title">품목별 카테고리 분포</div>
+      <div class="chart-platform-filter">
+        ${platforms.map(p=>`<button class="ch-pill${p.code===chPlatform?' active':''}" data-code="${p.code}" onclick="setChPlatform(this)">${p.label}</button>`).join('')}
+      </div>
+      <div class="chart-body">
+        <canvas id="pieChart" width="340" height="340"></canvas>
+        <div id="chartLegend" class="chart-legend"></div>
+      </div>
+    </div>`;
+  setTimeout(()=>drawChartForPlatform(chPlatform),20);
 }
 
 loadData();
