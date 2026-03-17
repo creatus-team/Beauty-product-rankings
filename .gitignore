@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.env
+.DS_Store
+*.xlsx
+*.json
+!amazon_cache.json
+!vercel.json
+last_run.log
+last_twitter_run.log
