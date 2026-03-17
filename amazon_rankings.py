@@ -499,7 +499,7 @@ let all = [], country = 'DB', ysSub = 'All Beauty';
 
 // country order: ALL first, then US, UK, JP, then others
 const ORDER = ['DB','CH','IG','ALL','US','UK','JP','YS','AX','DE','FR','CA','AU','IT','ES'];
-const TAB_LABELS = {'DB':'📊 대시보드','CH':'📈 카테고리 분석','IG':'🧪 성분 트렌드','ALL':'전체','YS':'YesStyle','AX':'AliExpress'};
+const TAB_LABELS = {'DB':'📊 전체 대시보드','CH':'📈 카테고리 분석','IG':'🧪 성분 트렌드','ALL':'전체','YS':'YesStyle','AX':'AliExpress'};
 
 async function loadData() {
   show('랭킹 데이터 불러오는 중...');
