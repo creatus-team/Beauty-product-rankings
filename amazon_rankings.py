@@ -424,6 +424,22 @@ select.fs:focus{border-color:var(--pink);background:#fff}
 .legend-group-hdr:first-child{margin-top:0}
 .legend-main-pct{color:var(--pink);font-size:.75rem;margin-left:4px}
 
+/* Ingredient trend chart */
+.ing-wrap{padding:24px;max-width:800px;margin:0 auto}
+.ing-title{font-size:1.05rem;font-weight:800;color:var(--pink);margin-bottom:4px}
+.ing-sub{font-size:.78rem;color:var(--muted);margin-bottom:18px}
+.ing-group-legend{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:20px}
+.ing-grp{display:flex;align-items:center;gap:5px;font-size:.76rem;font-weight:700;color:var(--text)}
+.ing-grp-dot{width:10px;height:10px;border-radius:3px;flex-shrink:0}
+.ing-bars{display:flex;flex-direction:column;gap:7px}
+.ing-row{display:flex;align-items:center;gap:10px}
+.ing-label{width:130px;text-align:right;font-size:.8rem;font-weight:700;color:var(--text);flex-shrink:0;line-height:1.2}
+.ing-grp-tag{font-size:.62rem;font-weight:600;color:var(--muted);display:block}
+.ing-track{flex:1;height:28px;background:var(--pink-light);border-radius:7px;overflow:hidden;position:relative}
+.ing-fill{height:100%;border-radius:7px;display:flex;align-items:center;padding:0 10px;transition:width .55s cubic-bezier(.4,0,.2,1);width:0%}
+.ing-fill-cnt{font-size:.72rem;font-weight:800;color:#fff;white-space:nowrap}
+.ing-meta{width:72px;font-size:.74rem;color:var(--muted);flex-shrink:0;text-align:left}
+
 /* loading */
 #loading{position:fixed;inset:0;background:rgba(253,246,248,.92);
   display:flex;flex-direction:column;align-items:center;justify-content:center;
@@ -482,8 +498,8 @@ select.fs:focus{border-color:var(--pink);background:#fff}
 let all = [], country = 'DB', ysSub = 'All Beauty';
 
 // country order: ALL first, then US, UK, JP, then others
-const ORDER = ['DB','CH','ALL','US','UK','JP','YS','AX','DE','FR','CA','AU','IT','ES'];
-const TAB_LABELS = {'DB':'📊 대시보드','CH':'📈 카테고리 분석','ALL':'전체','YS':'YesStyle','AX':'AliExpress'};
+const ORDER = ['DB','CH','IG','ALL','US','UK','JP','YS','AX','DE','FR','CA','AU','IT','ES'];
+const TAB_LABELS = {'DB':'📊 대시보드','CH':'📈 카테고리 분석','IG':'🧪 성분 트렌드','ALL':'전체','YS':'YesStyle','AX':'AliExpress'};
 
 async function loadData() {
   show('랭킹 데이터 불러오는 중...');
@@ -545,7 +561,7 @@ function buildTabs() {
     const label = TAB_LABELS[code] || code;
     const btn = document.createElement('button');
     btn.className = 'ctab' + (code===country ? ' active' : '');
-    const cntHtml = (code==='DB'||code==='CH') ? '' : `<span class="cnt">${counts[code]||0}</span>`;
+    const cntHtml = (code==='DB'||code==='CH'||code==='IG') ? '' : `<span class="cnt">${counts[code]||0}</span>`;
     btn.innerHTML = (flag ? `<span class="flag">${flag}</span>` : '') + label + cntHtml;
     btn.onclick = () => { country=code; ysSub='All Beauty'; resetYsPills(); buildTabs(); render(); };
     el.appendChild(btn);
@@ -651,6 +667,11 @@ function render() {
   if (country === 'CH') {
     toolbar.style.display = 'none';
     renderChart();
+    return;
+  }
+  if (country === 'IG') {
+    toolbar.style.display = 'none';
+    renderIngredientChart();
     return;
   }
   toolbar.style.display = '';
@@ -873,6 +894,121 @@ function renderChart() {
       </div>
     </div>`;
   setTimeout(()=>drawChartForPlatform(chPlatform),20);
+}
+
+// ── Ingredient Trend ──────────────────────────────────────────────────────────
+let igPlatform = 'ALL';
+const ING_GROUPS = {
+  '보습': '#54b8f7',
+  '안티에이징': '#7c6fe0',
+  '미백/항산화': '#f5a623',
+  '각질케어': '#3bb89e',
+  '진정/트러블': '#e8637a',
+  '천연/발효': '#10b981',
+};
+const INGREDIENT_LIST = [
+  {label:'히알루론산', group:'보습', re:/hyaluronic|히알루론/i},
+  {label:'세라마이드', group:'보습', re:/ceramide|세라마이드/i},
+  {label:'판테놀(B5)', group:'보습', re:/panthenol|pantothenic|provitamin.?b5|판테놀/i},
+  {label:'스쿠알란', group:'보습', re:/squalane|squalene|스쿠알/i},
+  {label:'콜라겐', group:'보습', re:/collagen|콜라겐/i},
+  {label:'레티놀', group:'안티에이징', re:/retinol|retinal|tretinoin|레티놀|레티날/i},
+  {label:'펩타이드', group:'안티에이징', re:/peptide|펩타이드|펩티드/i},
+  {label:'아데노신', group:'안티에이징', re:/adenosine|아데노신/i},
+  {label:'EGF', group:'안티에이징', re:/\begf\b/i},
+  {label:'나이아신아마이드', group:'미백/항산화', re:/niacinamide|나이아신아마이드/i},
+  {label:'비타민C', group:'미백/항산화', re:/vitamin.?c|ascorbic|ascorbyl|비타민.?c/i},
+  {label:'알부틴', group:'미백/항산화', re:/arbutin|알부틴/i},
+  {label:'글루타치온', group:'미백/항산화', re:/glutathione|글루타치온/i},
+  {label:'AHA(글리콜산)', group:'각질케어', re:/\baha\b|glycolic.?acid|lactic.?acid|mandelic/i},
+  {label:'BHA(살리실산)', group:'각질케어', re:/\bbha\b|salicylic|살리실/i},
+  {label:'PHA', group:'각질케어', re:/\bpha\b|gluconolactone/i},
+  {label:'시카/센텔라', group:'진정/트러블', re:/centella|cica|madecassoside|시카|센텔라/i},
+  {label:'티트리', group:'진정/트러블', re:/tea.?tree|티트리/i},
+  {label:'알란토인', group:'진정/트러블', re:/allantoin|알란토인/i},
+  {label:'녹차', group:'천연/발효', re:/green.?tea|camellia.?sinensis|녹차/i},
+  {label:'발효(Ferment)', group:'천연/발효', re:/ferment|발효/i},
+  {label:'프로폴리스', group:'천연/발효', re:/propolis|프로폴리스/i},
+  {label:'알로에', group:'천연/발효', re:/aloe|알로에/i},
+  {label:'로즈힙', group:'천연/발효', re:/rosehip|rose.?hip|로즈힙/i},
+];
+
+function drawIngredientChart(code) {
+  const items = code==='ALL' ? all : all.filter(i=>i._country_code===code);
+  const counts = {};
+  items.forEach(item => {
+    const text = (item.name||'') + ' ' + (item.categoryName||'') + ' ' + (item.categoryFullName||'');
+    INGREDIENT_LIST.forEach(({label,group,re}) => {
+      if (re.test(text)) {
+        if (!counts[label]) counts[label]={count:0,group};
+        counts[label].count++;
+      }
+    });
+  });
+  const sorted = Object.entries(counts)
+    .map(([label,{count,group}])=>({label,count,group}))
+    .sort((a,b)=>b.count-a.count)
+    .slice(0,18);
+
+  const maxCount = sorted[0]?.count || 1;
+  const total = items.length;
+  const container = document.getElementById('ingBars');
+  if (!container) return;
+
+  if (!sorted.length) {
+    container.innerHTML='<div class="empty"><div class="em">🔬</div><p>성분 정보를 찾을 수 없어요.</p></div>';
+    return;
+  }
+  container.innerHTML = sorted.map(({label,count,group})=>{
+    const pct = Math.round(count/maxCount*100);
+    const color = ING_GROUPS[group]||'#aaa';
+    return `<div class="ing-row" data-w="${pct}">
+      <div class="ing-label">${label}<span class="ing-grp-tag">${group}</span></div>
+      <div class="ing-track">
+        <div class="ing-fill" style="width:0%;background:${color}">
+          <span class="ing-fill-cnt">${count}개</span>
+        </div>
+      </div>
+      <div class="ing-meta">${Math.round(count/total*100)}% 제품</div>
+    </div>`;
+  }).join('');
+  setTimeout(()=>{
+    container.querySelectorAll('.ing-row').forEach(row=>{
+      row.querySelector('.ing-fill').style.width = row.dataset.w + '%';
+    });
+  }, 40);
+}
+
+function setIgPlatform(btn) {
+  document.querySelectorAll('.ig-pill').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  igPlatform = btn.dataset.code;
+  drawIngredientChart(igPlatform);
+}
+
+function renderIngredientChart() {
+  const platforms=[
+    {code:'ALL',label:'전체'},
+    {code:'US',label:'🇺🇸 Amazon US'},
+    {code:'UK',label:'🇬🇧 Amazon UK'},
+    {code:'JP',label:'🇯🇵 Amazon JP'},
+    {code:'YS',label:'🍀 YesStyle'},
+    {code:'AX',label:'🛍️ AliExpress'},
+  ];
+  const grpLegend = Object.entries(ING_GROUPS).map(([g,c])=>
+    `<div class="ing-grp"><span class="ing-grp-dot" style="background:${c}"></span>${g}</div>`
+  ).join('');
+  document.getElementById('gw').innerHTML=`
+    <div class="ing-wrap">
+      <div class="ing-title">🧪 트렌딩 성분 분석</div>
+      <div class="ing-sub">제품명 기준 성분 키워드 추출 · 상위 18개 성분</div>
+      <div class="chart-platform-filter">
+        ${platforms.map(p=>`<button class="ch-pill ig-pill${p.code===igPlatform?' active':''}" data-code="${p.code}" onclick="setIgPlatform(this)">${p.label}</button>`).join('')}
+      </div>
+      <div class="ing-group-legend">${grpLegend}</div>
+      <div class="ing-bars" id="ingBars"></div>
+    </div>`;
+  setTimeout(()=>drawIngredientChart(igPlatform), 20);
 }
 
 loadData();
