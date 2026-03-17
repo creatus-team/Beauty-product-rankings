@@ -696,25 +696,20 @@ function normalizeCategory(item) {
     const sub = item._ys_subcategory || '';
     if (sub === 'Skin Care') return '스킨케어';
     if (sub === 'Makeup') return '메이크업';
-    return '뷰티 종합';
+    return '기타';
   }
   if (item._country_code === 'AX') {
     const n = (item.name||'').toLowerCase();
     if (/serum|toner|moistur|cream|mask|essence|sunscreen|spf/.test(n)) return '스킨케어';
     if (/mascara|foundation|lip|eyeliner|blush|bb|cc/.test(n)) return '메이크업';
     if (/shampoo|conditioner|hair/.test(n)) return '헤어케어';
-    return '뷰티 종합';
+    return '기타';
   }
   const cat = (item.categoryName||'') + ' ' + (item.categoryFullName||'');
   const c = cat.toLowerCase();
-  if (/sun.?screen|sun.?block|spf|uv\s*pro/.test(c)) return '선케어';
-  if (/moistur|serum|toner|essence|cleanser|face.?wash|exfoliant|eye.?cream|mask|pore|acne|vitamin|niacinamide|retinol|skin.?care|brightening|anti.?aging/.test(c)) return '스킨케어';
-  if (/makeup|foundation|bb.?cream|cc.?cream|mascara|eyeliner|blush|bronzer|eyeshadow|concealer|contour/.test(c)) return '메이크업';
-  if (/lip/.test(c)) return '립케어';
   if (/hair|shampoo|conditioner|scalp/.test(c)) return '헤어케어';
-  if (/body|hand.?cream|foot|bath|shower/.test(c)) return '바디케어';
-  if (/perfume|fragrance|cologne/.test(c)) return '향수';
-  if (/nail/.test(c)) return '네일';
+  if (/makeup|foundation|bb.?cream|cc.?cream|mascara|eyeliner|blush|bronzer|eyeshadow|concealer|contour|lip/.test(c)) return '메이크업';
+  if (/moistur|serum|toner|essence|cleanser|face.?wash|exfoliant|eye.?cream|mask|pore|acne|vitamin|niacinamide|retinol|skin.?care|brightening|anti.?aging|sun.?screen|sun.?block|spf/.test(c)) return '스킨케어';
   return '기타';
 }
 
