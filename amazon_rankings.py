@@ -48,6 +48,19 @@ ALIEXPRESS_ACTOR = "piotrv1001~aliexpress-listings-scraper"
 ALIEXPRESS_SEARCH_URL = "https://www.aliexpress.com/wholesale?SearchText=beauty+skincare+makeup&SortType=total_tranRank_asc"
 _aliexpress_run_id = "qLIPASr5oFbA6fSrl"  # latest completed run (updated on refresh)
 
+# OliveYoung Global bestseller endpoints
+OY_ORDER_BEST_URL = "https://global.oliveyoung.com/display/product/best-seller/order-best"
+OY_KOREA_BEST_URL = "https://product-ranking-service.oliveyoung.com/v1/pages/ranking/sales/products"
+OY_KOREA_PARAMS = {"category-id": "1000000001", "region": "KR", "language-code": "en",
+                   "margin-country-code": "9999", "delivery-country-code": "1230"}
+OY_IMG_BASE = "https://cdn-image.oliveyoung.com/"
+OY_PRODUCT_BASE = "https://global.oliveyoung.com/product/detail?prdtNo="
+OY_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+    "Referer": "https://global.oliveyoung.com/display/page/best-seller?target=pillsTab1Nav1",
+    "Accept": "application/json, text/plain, */*",
+}
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _scrape_yesstyle_page(url, subcategory):
@@ -177,6 +190,65 @@ def fetch_aliexpress(trigger_new=False):
         print(f"[AliExpress] fetch failed: {e}")
         return []
 
+def fetch_oliveyoung():
+    """올리브영 글로벌 베스트셀러 (Top orders + Top in Korea)"""
+    items = []
+    # ── Top orders ──
+    try:
+        resp = requests.get(OY_ORDER_BEST_URL, headers=OY_HEADERS, timeout=20)
+        resp.raise_for_status()
+        for rank, p in enumerate(resp.json(), 1):
+            img = p.get("imagePath")
+            items.append({
+                "name": p.get("prdtName", ""),
+                "url": OY_PRODUCT_BASE + p.get("prdtNo", ""),
+                "asin": p.get("prdtNo"),
+                "position": rank,
+                "thumbnailUrl": (OY_IMG_BASE + img + "?RS=400x400&QT=80") if img else None,
+                "stars": float(p["avgScore"]) if p.get("avgScore") else None,
+                "reviewsCount": int(p["reviewCnt"]) if p.get("reviewCnt") else None,
+                "categoryName": "Top orders",
+                "categoryFullName": "OliveYoung Top orders Bestsellers",
+                "_country_code": "OY",
+                "_country_flag": "🌿",
+                "_country_name": "OliveYoung",
+                "_oy_subcategory": "Top orders",
+                "_price_value": float(p["saleAmt"]) if p.get("saleAmt") else None,
+                "_price_currency": "$",
+            })
+        print(f"[OliveYoung] Top orders: {len(items)} items")
+    except Exception as e:
+        print(f"[OliveYoung] Top orders failed: {e}")
+    # ── Top in Korea ──
+    korea_items = []
+    try:
+        resp = requests.get(OY_KOREA_BEST_URL, params=OY_KOREA_PARAMS, headers=OY_HEADERS, timeout=20)
+        resp.raise_for_status()
+        products = resp.json().get("data", {}).get("pages.ranking.products", [])
+        for rank, p in enumerate(products, 1):
+            img = p.get("thumbnail_img_url")
+            korea_items.append({
+                "name": p.get("name", ""),
+                "url": OY_PRODUCT_BASE + p.get("id", ""),
+                "asin": p.get("id"),
+                "position": rank,
+                "thumbnailUrl": (OY_IMG_BASE + img + "?RS=400x400&QT=80") if img else None,
+                "stars": float(p["rate"]) if p.get("rate") else None,
+                "reviewsCount": None,
+                "categoryName": "Top in Korea",
+                "categoryFullName": "OliveYoung Top in Korea Bestsellers",
+                "_country_code": "OY",
+                "_country_flag": "🌿",
+                "_country_name": "OliveYoung",
+                "_oy_subcategory": "Top in Korea",
+                "_price_value": float(p["sale_price"]) if p.get("sale_price") else None,
+                "_price_currency": "$",
+            })
+        print(f"[OliveYoung] Top in Korea: {len(korea_items)} items")
+    except Exception as e:
+        print(f"[OliveYoung] Top in Korea failed: {e}")
+    return items + korea_items
+
 def detect_country(item):
     for field in ("input", "categoryUrl", "url"):
         val = item.get(field) or ""
@@ -212,6 +284,10 @@ def fetch_from_apify(refresh=False):
     # AliExpress 추가
     ax_items = fetch_aliexpress(trigger_new=refresh)
     all_items.extend(ax_items)
+    # OliveYoung 추가
+    oy_items = fetch_oliveyoung()
+    print(f"[OliveYoung] fetched {len(oy_items)} items")
+    all_items.extend(oy_items)
     return all_items
 
 def load_cache():
@@ -522,17 +598,22 @@ select.fs:focus{border-color:var(--pink);background:#fff}
     <button class="ys-pill" data-sub="Skin Care" onclick="setYsSub(this)">Skin Care</button>
     <button class="ys-pill" data-sub="Makeup" onclick="setYsSub(this)">Makeup</button>
   </div>
+  <div class="ys-pills" id="oyPills" style="display:none">
+    <button class="ys-pill active" data-sub="All" onclick="setOySub(this)">All</button>
+    <button class="ys-pill" data-sub="Top orders" onclick="setOySub(this)">Top orders</button>
+    <button class="ys-pill" data-sub="Top in Korea" onclick="setOySub(this)">Top in Korea</button>
+  </div>
   <span class="rc" id="rc"></span>
 </div>
 
 <div class="gw" id="gw"></div>
 
 <script>
-let all = [], country = 'DB', ysSub = 'All Beauty';
+let all = [], country = 'DB', ysSub = 'All Beauty', oySub = 'All';
 
 // country order: ALL first, then US, UK, JP, then others
-const ORDER = ['DB','CH','IG','ALL','US','UK','JP','YS','AX','DE','FR','CA','AU','IT','ES'];
-const TAB_LABELS = {'DB':'📊 전체 대시보드','CH':'📈 카테고리 분석','IG':'🧪 성분 트렌드','ALL':'전체','YS':'YesStyle','AX':'AliExpress'};
+const ORDER = ['DB','CH','IG','ALL','US','UK','JP','YS','AX','OY','DE','FR','CA','AU','IT','ES'];
+const TAB_LABELS = {'DB':'📊 전체 대시보드','CH':'📈 카테고리 분석','IG':'🧪 성분 트렌드','ALL':'전체','YS':'YesStyle','AX':'AliExpress','OY':'🌿 OliveYoung'};
 
 async function loadData() {
   show('랭킹 데이터 불러오는 중...');
@@ -596,7 +677,7 @@ function buildTabs() {
     btn.className = 'ctab' + (code===country ? ' active' : '');
     const cntHtml = (code==='DB'||code==='CH'||code==='IG') ? '' : `<span class="cnt">${counts[code]||0}</span>`;
     btn.innerHTML = (flag ? `<span class="flag">${flag}</span>` : '') + label + cntHtml;
-    btn.onclick = () => { country=code; ysSub='All Beauty'; resetYsPills(); buildTabs(); render(); };
+    btn.onclick = () => { country=code; ysSub='All Beauty'; oySub='All'; resetYsPills(); resetOyPills(); buildTabs(); render(); };
     el.appendChild(btn);
   });
 }
@@ -611,14 +692,28 @@ function setYsSub(btn) {
 
 function resetYsPills() {
   ysSub = 'All Beauty';
-  document.querySelectorAll('.ys-pill').forEach(p => {
+  document.querySelectorAll('#ysPills .ys-pill').forEach(p => {
     p.classList.toggle('active', p.dataset.sub === 'All Beauty');
   });
 }
 
 function updateYsPills() {
-  const pills = document.getElementById('ysPills');
-  pills.style.display = country === 'YS' ? 'flex' : 'none';
+  document.getElementById('ysPills').style.display = country === 'YS' ? 'flex' : 'none';
+  document.getElementById('oyPills').style.display = country === 'OY' ? 'flex' : 'none';
+}
+
+function setOySub(btn) {
+  oySub = btn.dataset.sub;
+  document.querySelectorAll('#oyPills .ys-pill').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  render();
+}
+
+function resetOyPills() {
+  oySub = 'All';
+  document.querySelectorAll('#oyPills .ys-pill').forEach(p => {
+    p.classList.toggle('active', p.dataset.sub === 'All');
+  });
 }
 
 function starViz(n) {
@@ -640,6 +735,7 @@ function getFiltered() {
   let items = all.filter(i => {
     if (country!=='ALL' && i._country_code!==country) return false;
     if (country==='YS' && ysSub!=='All Beauty' && i._ys_subcategory!==ysSub) return false;
+    if (country==='OY' && oySub!=='All' && i._oy_subcategory!==oySub) return false;
     if (q && !(i.name||'').toLowerCase().includes(q) && !(i.asin||'').toLowerCase().includes(q)) return false;
     return true;
   });
@@ -661,11 +757,12 @@ function renderDashboard() {
     {code:'JP', label:'Amazon JP'},
     {code:'YS', label:'YesStyle'},
     {code:'AX', label:'AliExpress'},
+    {code:'OY', label:'OliveYoung', sub:'Top orders'},
   ];
   let prodHtml = '';
-  platforms.forEach(({code, label}) => {
+  platforms.forEach(({code, label, sub}) => {
     const flag = (all.find(i=>i._country_code===code)||{})._country_flag || '';
-    const top5 = all.filter(i=>i._country_code===code)
+    const top5 = all.filter(i=>i._country_code===code && (!sub || i._oy_subcategory===sub))
       .sort((a,b)=>(a.position||999)-(b.position||999)).slice(0,5);
     prodHtml += `<div class="dash-mini-col"><div class="dash-mini-hdr"><span>${flag}</span>${label}</div>`;
     top5.forEach((item,idx) => {
@@ -793,16 +890,20 @@ function getDetailCategory(item) {
     }
     return {main:'기타', sub:'기타'};
   }
-  if (code === 'AX') {
+  if (code === 'AX' || code === 'OY') {
     if (/shampoo|conditioner|hair/.test(name)) return {main:'헤어케어', sub:'헤어케어'};
+    if (/sun.?screen|sun.?serum|\bspf\b/.test(name)) return {main:'스킨케어', sub:'선케어'};
     if (/serum|ampoule|essence/.test(name)) return {main:'스킨케어', sub:'세럼/에센스'};
-    if (/toner/.test(name)) return {main:'스킨케어', sub:'토너/스킨'};
-    if (/sunscreen|spf/.test(name)) return {main:'스킨케어', sub:'선케어'};
-    if (/cream|moistur|lotion/.test(name)) return {main:'스킨케어', sub:'로션/크림'};
+    if (/toner|skin(?! care)/.test(name)) return {main:'스킨케어', sub:'토너/스킨'};
     if (/mask/.test(name)) return {main:'스킨케어', sub:'마스크팩'};
-    if (/mascara|eyeliner/.test(name)) return {main:'메이크업', sub:'아이메이크업'};
-    if (/foundation|bb|cc/.test(name)) return {main:'메이크업', sub:'파운데이션/BB'};
-    if (/lip/.test(name)) return {main:'메이크업', sub:'립메이크업'};
+    if (/patch|acne.?patch|pimple.?patch/.test(name)) return {main:'스킨케어', sub:'패치'};
+    if (/cleanser|foam|wash/.test(name)) return {main:'스킨케어', sub:'클렌저'};
+    if (/eye.?cream|under.?eye/.test(name)) return {main:'스킨케어', sub:'아이크림'};
+    if (/cream|moistur|lotion/.test(name)) return {main:'스킨케어', sub:'로션/크림'};
+    if (/mascara|eyeliner|eyebrow|eyeshadow/.test(name)) return {main:'메이크업', sub:'아이메이크업'};
+    if (/foundation|bb|cc|cushion/.test(name)) return {main:'메이크업', sub:'파운데이션/BB'};
+    if (/lip(?!.?balm)/.test(name)) return {main:'메이크업', sub:'립메이크업'};
+    if (/lip.?balm|lip.?care/.test(name)) return {main:'스킨케어', sub:'립케어'};
     return {main:'기타', sub:'기타'};
   }
   // Amazon: categoryName is often generic ("Beauty & Personal Care"), use name too
@@ -928,6 +1029,7 @@ function renderChart() {
     {code:'JP',label:'🇯🇵 Amazon JP'},
     {code:'YS',label:'🍀 YesStyle'},
     {code:'AX',label:'🛍️ AliExpress'},
+    {code:'OY',label:'🌿 OliveYoung'},
   ];
   document.getElementById('gw').innerHTML=`
     <div class="chart-wrap">
@@ -1041,6 +1143,7 @@ function renderIngredientChart() {
     {code:'JP',label:'🇯🇵 Amazon JP'},
     {code:'YS',label:'🍀 YesStyle'},
     {code:'AX',label:'🛍️ AliExpress'},
+    {code:'OY',label:'🌿 OliveYoung'},
   ];
   const grpLegend = Object.entries(ING_GROUPS).map(([g,c])=>
     `<div class="ing-grp"><span class="ing-grp-dot" style="background:${c}"></span>${g}</div>`
