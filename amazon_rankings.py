@@ -758,29 +758,29 @@ function getDetailCategory(item) {
     if (/lip/.test(name)) return {main:'메이크업', sub:'립메이크업'};
     return {main:'기타', sub:'기타'};
   }
-  // Amazon: categoryName is granular
+  // Amazon: categoryName is often generic ("Beauty & Personal Care"), use name too
   const cat = ((item.categoryName||'') + ' ' + (item.categoryFullName||'')).toLowerCase();
-  if (/hair|shampoo|conditioner|scalp/.test(cat)) {
-    if (/shampoo/.test(cat)) return {main:'헤어케어', sub:'샴푸'};
-    if (/conditioner|treatment/.test(cat)) return {main:'헤어케어', sub:'컨디셔너'};
-    return {main:'헤어케어', sub:'헤어케어'};
-  }
-  if (/foundation|bb.?cream|cc.?cream/.test(cat)) return {main:'메이크업', sub:'파운데이션/BB'};
-  if (/mascara|eyeliner|eyebrow|eyeshadow/.test(cat)) return {main:'메이크업', sub:'아이메이크업'};
-  if (/lip(?!.?balm)|lipstick/.test(cat)) return {main:'메이크업', sub:'립메이크업'};
-  if (/blush|bronzer|highlighter|contour/.test(cat)) return {main:'메이크업', sub:'치크/하이라이터'};
-  if (/makeup|cosmetic/.test(cat)) return {main:'메이크업', sub:'기타 메이크업'};
-  if (/sun.?screen|sun.?block|spf/.test(cat)) return {main:'스킨케어', sub:'선케어'};
-  if (/toner|astringent/.test(cat)) return {main:'스킨케어', sub:'토너/스킨'};
-  if (/serum|essence|ampoule/.test(cat)) return {main:'스킨케어', sub:'세럼/에센스'};
-  if (/eye.?cream|under.?eye/.test(cat)) return {main:'스킨케어', sub:'아이크림'};
-  if (/lip.?balm|lip.?care/.test(cat)) return {main:'스킨케어', sub:'립케어'};
-  if (/mask|sheet.?mask/.test(cat)) return {main:'스킨케어', sub:'마스크팩'};
-  if (/cleanser|cleansing|face.?wash|foam/.test(cat)) return {main:'스킨케어', sub:'클렌저'};
-  if (/exfoli|peeling|scrub/.test(cat)) return {main:'스킨케어', sub:'각질케어'};
-  if (/pad/.test(cat)) return {main:'스킨케어', sub:'패드'};
-  if (/moistur|lotion|cream|emulsion/.test(cat)) return {main:'스킨케어', sub:'로션/크림'};
-  if (/skin.?care|brightening|whitening|anti.?aging|retinol|vitamin/.test(cat)) return {main:'스킨케어', sub:'기타 스킨케어'};
+  const t = cat + ' ' + name;  // combine category + product name for matching
+  if (/shampoo/.test(t)) return {main:'헤어케어', sub:'샴푸'};
+  if (/conditioner|hair.?treatment|hair.?mask/.test(t)) return {main:'헤어케어', sub:'컨디셔너'};
+  if (/hair(?! removal)|scalp/.test(t)) return {main:'헤어케어', sub:'헤어케어'};
+  if (/foundation|bb.?cream|cc.?cream|cushion.?compact/.test(t)) return {main:'메이크업', sub:'파운데이션/BB'};
+  if (/mascara|eyeliner|eyebrow|eyeshadow/.test(t)) return {main:'메이크업', sub:'아이메이크업'};
+  if (/lipstick|lip.?gloss|lip.?liner/.test(t)) return {main:'메이크업', sub:'립메이크업'};
+  if (/blush|bronzer|highlighter|contour/.test(t)) return {main:'메이크업', sub:'치크/하이라이터'};
+  if (/makeup.?remover|make.?up.?remover|micellar/.test(t)) return {main:'메이크업', sub:'클렌징'};
+  if (/sun.?screen|sun.?block|\bspf\b/.test(t)) return {main:'스킨케어', sub:'선케어'};
+  if (/\btoner\b|toning.?pad|toning.?wipe/.test(t)) return {main:'스킨케어', sub:'토너/스킨'};
+  if (/serum|essence|ampoule|booster/.test(t)) return {main:'스킨케어', sub:'세럼/에센스'};
+  if (/eye.?cream|under.?eye|eye.?gel/.test(t)) return {main:'스킨케어', sub:'아이크림'};
+  if (/lip.?balm|lip.?care|lip.?treatment/.test(t)) return {main:'스킨케어', sub:'립케어'};
+  if (/face.?mask|sheet.?mask|hydrogel.?mask|sleeping.?mask|overnight.?mask/.test(t)) return {main:'스킨케어', sub:'마스크팩'};
+  if (/pimple.?patch|acne.?patch|hydrocolloid/.test(t)) return {main:'스킨케어', sub:'패치'};
+  if (/glycolic|salicylic|lactic.?acid|\baha\b|\bbha\b|exfoliat|peeling|scrub/.test(t)) return {main:'스킨케어', sub:'각질케어'};
+  if (/toner.?pad|facial.?pad|cotton.?pad|\bpad\b/.test(t)) return {main:'스킨케어', sub:'패드'};
+  if (/foam.?cleanser|face.?wash|facial.?cleanser|cleansing/.test(t)) return {main:'스킨케어', sub:'클렌저'};
+  if (/moisturiz|face.?lotion|face.?cream|day.?cream|night.?cream|emulsion/.test(t)) return {main:'스킨케어', sub:'로션/크림'};
+  if (/niacinamide|retinol|vitamin.?c|peptide|brightening|whitening|anti.?aging/.test(t)) return {main:'스킨케어', sub:'기타 스킨케어'};
   return {main:'기타', sub:'기타'};
 }
 
