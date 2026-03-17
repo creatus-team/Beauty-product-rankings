@@ -418,6 +418,11 @@ select.fs:focus{border-color:var(--pink);background:#fff}
 .legend-label{flex:1;font-weight:600;color:var(--text)}
 .legend-pct{font-weight:800;color:var(--pink);min-width:38px;text-align:right}
 .legend-cnt{color:var(--muted);font-size:.72rem}
+.legend-group-hdr{font-size:.76rem;font-weight:800;color:var(--text);
+  margin-top:12px;margin-bottom:2px;padding:3px 6px;
+  border-left:3px solid var(--pink);letter-spacing:.3px}
+.legend-group-hdr:first-child{margin-top:0}
+.legend-main-pct{color:var(--pink);font-size:.75rem;margin-left:4px}
 
 /* loading */
 #loading{position:fixed;inset:0;background:rgba(253,246,248,.92);
@@ -689,84 +694,155 @@ function render() {
 
 // ── Chart ─────────────────────────────────────────────────────────────────────
 let chPlatform = 'ALL';
-const PIE_COLORS = ['#e8637a','#f5a623','#7c6fe0','#3bb89e','#54b8f7','#f76c8a','#a78bfa','#f97316','#10b981','#ec4899','#8b5cf6','#06b6d4','#84cc16'];
+const MAIN_ORDER_CH = ['스킨케어','메이크업','헤어케어','기타'];
+const MAIN_CAT_COLORS = {
+  '스킨케어': ['#e8637a','#c0445f','#f07688','#a83352','#f5a0ae','#e05070','#d43060','#f9c4cc','#b83050'],
+  '메이크업': ['#7c6fe0','#6352c8','#9b87f5','#5444b0','#b3a8f8','#4a3ab0','#c5bff9'],
+  '헤어케어': ['#3bb89e','#2d9a84','#10b981','#0d9668','#5ecfb8'],
+  '기타':     ['#aaa','#c8c8c8'],
+};
 
-function normalizeCategory(item) {
-  if (item._country_code === 'YS') {
+function getDetailCategory(item) {
+  const code = item._country_code;
+  const name = (item.name||'').toLowerCase();
+  if (code === 'YS') {
     const sub = item._ys_subcategory || '';
-    if (sub === 'Skin Care') return '스킨케어';
-    if (sub === 'Makeup') return '메이크업';
-    return '기타';
+    if (sub === 'Makeup') {
+      if (/lip(?!.?balm)/.test(name)) return {main:'메이크업', sub:'립메이크업'};
+      if (/eye|mascara|liner/.test(name)) return {main:'메이크업', sub:'아이메이크업'};
+      if (/foundation|bb|cc|cushion/.test(name)) return {main:'메이크업', sub:'파운데이션/BB'};
+      return {main:'메이크업', sub:'기타 메이크업'};
+    }
+    if (sub === 'Skin Care') {
+      if (/sun|spf/.test(name)) return {main:'스킨케어', sub:'선케어'};
+      if (/toner|skin(?! care)/.test(name)) return {main:'스킨케어', sub:'토너/스킨'};
+      if (/serum|ampoule|essence/.test(name)) return {main:'스킨케어', sub:'세럼/에센스'};
+      if (/pad/.test(name)) return {main:'스킨케어', sub:'패드'};
+      if (/mask/.test(name)) return {main:'스킨케어', sub:'마스크팩'};
+      if (/cleanser|foam|wash/.test(name)) return {main:'스킨케어', sub:'클렌저'};
+      if (/cream|moistur|lotion|emulsion/.test(name)) return {main:'스킨케어', sub:'로션/크림'};
+      return {main:'스킨케어', sub:'기타 스킨케어'};
+    }
+    return {main:'기타', sub:'기타'};
   }
-  if (item._country_code === 'AX') {
-    const n = (item.name||'').toLowerCase();
-    if (/serum|toner|moistur|cream|mask|essence|sunscreen|spf/.test(n)) return '스킨케어';
-    if (/mascara|foundation|lip|eyeliner|blush|bb|cc/.test(n)) return '메이크업';
-    if (/shampoo|conditioner|hair/.test(n)) return '헤어케어';
-    return '기타';
+  if (code === 'AX') {
+    if (/shampoo|conditioner|hair/.test(name)) return {main:'헤어케어', sub:'헤어케어'};
+    if (/serum|ampoule|essence/.test(name)) return {main:'스킨케어', sub:'세럼/에센스'};
+    if (/toner/.test(name)) return {main:'스킨케어', sub:'토너/스킨'};
+    if (/sunscreen|spf/.test(name)) return {main:'스킨케어', sub:'선케어'};
+    if (/cream|moistur|lotion/.test(name)) return {main:'스킨케어', sub:'로션/크림'};
+    if (/mask/.test(name)) return {main:'스킨케어', sub:'마스크팩'};
+    if (/mascara|eyeliner/.test(name)) return {main:'메이크업', sub:'아이메이크업'};
+    if (/foundation|bb|cc/.test(name)) return {main:'메이크업', sub:'파운데이션/BB'};
+    if (/lip/.test(name)) return {main:'메이크업', sub:'립메이크업'};
+    return {main:'기타', sub:'기타'};
   }
-  const cat = (item.categoryName||'') + ' ' + (item.categoryFullName||'');
-  const c = cat.toLowerCase();
-  if (/hair|shampoo|conditioner|scalp/.test(c)) return '헤어케어';
-  if (/makeup|foundation|bb.?cream|cc.?cream|mascara|eyeliner|blush|bronzer|eyeshadow|concealer|contour|lip/.test(c)) return '메이크업';
-  if (/moistur|serum|toner|essence|cleanser|face.?wash|exfoliant|eye.?cream|mask|pore|acne|vitamin|niacinamide|retinol|skin.?care|brightening|anti.?aging|sun.?screen|sun.?block|spf/.test(c)) return '스킨케어';
-  return '기타';
+  // Amazon: categoryName is granular
+  const cat = ((item.categoryName||'') + ' ' + (item.categoryFullName||'')).toLowerCase();
+  if (/hair|shampoo|conditioner|scalp/.test(cat)) {
+    if (/shampoo/.test(cat)) return {main:'헤어케어', sub:'샴푸'};
+    if (/conditioner|treatment/.test(cat)) return {main:'헤어케어', sub:'컨디셔너'};
+    return {main:'헤어케어', sub:'헤어케어'};
+  }
+  if (/foundation|bb.?cream|cc.?cream/.test(cat)) return {main:'메이크업', sub:'파운데이션/BB'};
+  if (/mascara|eyeliner|eyebrow|eyeshadow/.test(cat)) return {main:'메이크업', sub:'아이메이크업'};
+  if (/lip(?!.?balm)|lipstick/.test(cat)) return {main:'메이크업', sub:'립메이크업'};
+  if (/blush|bronzer|highlighter|contour/.test(cat)) return {main:'메이크업', sub:'치크/하이라이터'};
+  if (/makeup|cosmetic/.test(cat)) return {main:'메이크업', sub:'기타 메이크업'};
+  if (/sun.?screen|sun.?block|spf/.test(cat)) return {main:'스킨케어', sub:'선케어'};
+  if (/toner|astringent/.test(cat)) return {main:'스킨케어', sub:'토너/스킨'};
+  if (/serum|essence|ampoule/.test(cat)) return {main:'스킨케어', sub:'세럼/에센스'};
+  if (/eye.?cream|under.?eye/.test(cat)) return {main:'스킨케어', sub:'아이크림'};
+  if (/lip.?balm|lip.?care/.test(cat)) return {main:'스킨케어', sub:'립케어'};
+  if (/mask|sheet.?mask/.test(cat)) return {main:'스킨케어', sub:'마스크팩'};
+  if (/cleanser|cleansing|face.?wash|foam/.test(cat)) return {main:'스킨케어', sub:'클렌저'};
+  if (/exfoli|peeling|scrub/.test(cat)) return {main:'스킨케어', sub:'각질케어'};
+  if (/pad/.test(cat)) return {main:'스킨케어', sub:'패드'};
+  if (/moistur|lotion|cream|emulsion/.test(cat)) return {main:'스킨케어', sub:'로션/크림'};
+  if (/skin.?care|brightening|whitening|anti.?aging|retinol|vitamin/.test(cat)) return {main:'스킨케어', sub:'기타 스킨케어'};
+  return {main:'기타', sub:'기타'};
 }
 
 function drawChartForPlatform(code) {
   const items = code==='ALL' ? all : all.filter(i=>i._country_code===code);
-  const catCounts = {};
-  items.forEach(item => { const k=normalizeCategory(item); catCounts[k]=(catCounts[k]||0)+1; });
-  const sorted = Object.entries(catCounts).sort((a,b)=>b[1]-a[1]);
-  const total = sorted.reduce((s,[,v])=>s+v,0);
+  const subCounts = {};
+  items.forEach(item => {
+    const {main, sub} = getDetailCategory(item);
+    if (!subCounts[main]) subCounts[main]={};
+    subCounts[main][sub]=(subCounts[main][sub]||0)+1;
+  });
+  const slices=[];
+  MAIN_ORDER_CH.forEach(main => {
+    if (!subCounts[main]) return;
+    const subs=Object.entries(subCounts[main]).sort((a,b)=>b[1]-a[1]);
+    const colors=MAIN_CAT_COLORS[main];
+    subs.forEach(([sub,count],i)=>slices.push({main,sub,count,color:colors[i%colors.length]}));
+  });
+  const total=slices.reduce((s,d)=>s+d.count,0);
 
-  const canvas = document.getElementById('pieChart');
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  const W=canvas.width, H=canvas.height, cx=W/2, cy=H/2;
-  const r=Math.min(cx,cy)-20, ri=r*0.44;
-
+  const canvas=document.getElementById('pieChart');
+  if(!canvas) return;
+  const ctx=canvas.getContext('2d');
+  const W=canvas.width,H=canvas.height,cx=W/2,cy=H/2;
+  const r=Math.min(cx,cy)-20,ri=r*0.44;
   let prog=0;
-  const animate = () => {
+  const animate=()=>{
     ctx.clearRect(0,0,W,H);
     let angle=-Math.PI/2;
-    sorted.forEach(([,count],i) => {
+    slices.forEach(({count,color})=>{
       const slice=(count/total)*2*Math.PI*Math.min(prog,1);
-      ctx.beginPath(); ctx.moveTo(cx,cy);
+      ctx.beginPath();ctx.moveTo(cx,cy);
       ctx.arc(cx,cy,r,angle,angle+slice);
       ctx.closePath();
-      ctx.fillStyle=PIE_COLORS[i%PIE_COLORS.length];
-      ctx.fill();
-      ctx.strokeStyle='#fdf6f8'; ctx.lineWidth=2.5; ctx.stroke();
-      if (prog>=1 && count/total>0.04) {
-        const mid=angle+slice/2;
-        ctx.fillStyle='#fff'; ctx.font='bold 11px system-ui';
-        ctx.textAlign='center'; ctx.textBaseline='middle';
-        ctx.fillText(Math.round(count/total*100)+'%', cx+(r*.7)*Math.cos(mid), cy+(r*.7)*Math.sin(mid));
-      }
+      ctx.fillStyle=color;ctx.fill();
+      ctx.strokeStyle='#fdf6f8';ctx.lineWidth=2.5;ctx.stroke();
       angle+=slice;
     });
-    ctx.beginPath(); ctx.arc(cx,cy,ri,0,2*Math.PI);
-    ctx.fillStyle='#fdf6f8'; ctx.fill();
-    if (prog>=1) {
-      ctx.fillStyle='#e8637a'; ctx.font='bold 22px system-ui';
-      ctx.textAlign='center'; ctx.textBaseline='middle';
-      ctx.fillText(total, cx, cy-9);
-      ctx.fillStyle='#888'; ctx.font='11px system-ui';
-      ctx.fillText('개 제품', cx, cy+10);
+    if(prog>=1){
+      angle=-Math.PI/2;
+      slices.forEach(({count})=>{
+        const slice=(count/total)*2*Math.PI;
+        if(count/total>0.04){
+          const mid=angle+slice/2;
+          ctx.fillStyle='#fff';ctx.font='bold 11px system-ui';
+          ctx.textAlign='center';ctx.textBaseline='middle';
+          ctx.fillText(Math.round(count/total*100)+'%',cx+(r*.7)*Math.cos(mid),cy+(r*.7)*Math.sin(mid));
+        }
+        angle+=slice;
+      });
+    }
+    ctx.beginPath();ctx.arc(cx,cy,ri,0,2*Math.PI);
+    ctx.fillStyle='#fdf6f8';ctx.fill();
+    if(prog>=1){
+      ctx.fillStyle='#e8637a';ctx.font='bold 22px system-ui';
+      ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(total,cx,cy-9);
+      ctx.fillStyle='#888';ctx.font='11px system-ui';
+      ctx.fillText('개 제품',cx,cy+10);
     }
     prog+=0.045;
-    if (prog<1.05) requestAnimationFrame(animate);
+    if(prog<1.05) requestAnimationFrame(animate);
   };
   animate();
 
-  document.getElementById('chartLegend').innerHTML = sorted.map(([cat,count],i)=>`
-    <div class="legend-item">
-      <span class="legend-dot" style="background:${PIE_COLORS[i%PIE_COLORS.length]}"></span>
-      <span class="legend-label">${cat}</span>
-      <span class="legend-pct">${Math.round(count/total*100)}%</span>
-      <span class="legend-cnt">&nbsp;(${count})</span>
-    </div>`).join('');
+  // Legend grouped by main category
+  const legend=document.getElementById('chartLegend');
+  let html='';
+  MAIN_ORDER_CH.forEach(main=>{
+    const mainSlices=slices.filter(s=>s.main===main);
+    if(!mainSlices.length) return;
+    const mainTotal=mainSlices.reduce((s,d)=>s+d.count,0);
+    html+=`<div class="legend-group-hdr">${main}<span class="legend-main-pct">${Math.round(mainTotal/total*100)}%</span></div>`;
+    mainSlices.forEach(({sub,count,color})=>{
+      html+=`<div class="legend-item">
+        <span class="legend-dot" style="background:${color}"></span>
+        <span class="legend-label">${sub}</span>
+        <span class="legend-pct">${Math.round(count/total*100)}%</span>
+        <span class="legend-cnt">&nbsp;(${count})</span>
+      </div>`;
+    });
+  });
+  legend.innerHTML=html;
 }
 
 function setChPlatform(btn) {
