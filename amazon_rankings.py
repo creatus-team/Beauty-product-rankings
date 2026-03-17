@@ -550,7 +550,7 @@ function buildTabs() {
     const c = i._country_code;
     if (c) { counts[c] = (counts[c]||0)+1; seen.add(c); }
   });
-  const codes = ['DB', 'CH', 'ALL', ...ORDER.filter(c => c!=='ALL' && c!=='DB' && c!=='CH' && seen.has(c)),
+  const codes = ['DB', 'CH', 'IG', 'ALL', ...ORDER.filter(c => c!=='ALL' && c!=='DB' && c!=='CH' && c!=='IG' && seen.has(c)),
                  ...[...seen].filter(c => !ORDER.includes(c))];
 
   const el = document.getElementById('tabs');
