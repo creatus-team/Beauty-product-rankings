@@ -11,10 +11,5 @@
       "src": "/(.*)",
       "dest": "amazon_rankings.py"
     }
-  ],
-  "functions": {
-    "amazon_rankings.py": {
-      "maxDuration": 60
-    }
-  }
+  ]
 }
