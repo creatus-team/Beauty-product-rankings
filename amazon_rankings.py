@@ -393,6 +393,39 @@ select.fs:focus{border-color:var(--pink);background:#fff}
 .dash-price{font-size:.74rem;font-weight:800;color:var(--pink);margin-top:4px}
 @media(max-width:700px){.dash{flex-wrap:nowrap}.dash-col{min-width:160px}}
 
+/* Combined Dashboard layout */
+.db-main{display:flex;gap:16px;padding:16px 20px;height:calc(100vh - 56px);overflow:hidden;box-sizing:border-box}
+.db-left{flex:1.4;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+.db-right{width:370px;flex-shrink:0;display:flex;flex-direction:column;gap:12px;overflow-y:auto;padding-right:2px}
+.db-section-hdr{font-size:.88rem;font-weight:800;color:var(--pink);margin-bottom:10px}
+.dash-compact{display:flex;gap:10px;flex:1;overflow-x:auto;align-items:flex-start;padding-bottom:4px}
+.dash-mini-col{flex:1;min-width:155px;max-width:200px;background:var(--surface);border-radius:12px;border:1px solid var(--border);overflow:hidden;box-shadow:var(--shadow);display:flex;flex-direction:column;flex-shrink:0}
+.dash-mini-hdr{padding:7px 10px;display:flex;align-items:center;gap:6px;background:linear-gradient(135deg,var(--pink-light) 0%,#fff 100%);border-bottom:2px solid var(--pink-mid);font-weight:800;font-size:.73rem;color:var(--pink);white-space:nowrap}
+.dash-mini-item{display:flex;align-items:center;gap:7px;padding:6px 8px;border-bottom:1px solid var(--border);text-decoration:none;color:inherit;transition:background .15s}
+.dash-mini-item:hover{background:var(--pink-light)}
+.dash-mini-item:last-child{border-bottom:none}
+.dash-mini-rank{font-size:.62rem;font-weight:900;color:#fff;width:19px;height:19px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.dash-mini-img{width:46px;height:46px;border-radius:7px;object-fit:contain;background:#f9f3f5;flex-shrink:0}
+.dash-mini-ph{width:46px;height:46px;border-radius:7px;background:#f9f3f5;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:1.3rem}
+.dash-mini-name{font-size:.68rem;font-weight:600;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;color:var(--text);flex:1;min-width:0}
+.db-chart-card{background:var(--surface);border-radius:14px;border:1px solid var(--border);box-shadow:var(--shadow);padding:14px 16px;flex-shrink:0}
+.db-card-title{font-size:.82rem;font-weight:800;color:var(--pink);margin-bottom:10px}
+.db-pie-body{display:flex;gap:12px;align-items:flex-start}
+.db-pie-legend{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0;overflow-y:auto;max-height:190px}
+.db-legend-grp{font-size:.68rem;font-weight:800;color:var(--text);margin-top:6px;margin-bottom:1px;border-left:2px solid var(--pink);padding-left:4px}
+.db-legend-grp:first-child{margin-top:0}
+.db-legend-item{display:flex;align-items:center;gap:5px;font-size:.69rem;padding:2px 3px;border-radius:4px}
+.db-legend-dot{width:9px;height:9px;border-radius:2px;flex-shrink:0}
+.db-legend-label{flex:1;font-weight:600;color:var(--text);overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.db-legend-pct{font-weight:800;color:var(--pink);font-size:.68rem;flex-shrink:0}
+.db-ing-bars{display:flex;flex-direction:column;gap:5px}
+.db-ing-row{display:flex;align-items:center;gap:8px}
+.db-ing-label{width:98px;text-align:right;font-size:.68rem;font-weight:700;color:var(--text);flex-shrink:0;line-height:1.2}
+.db-ing-track{flex:1;height:20px;background:var(--pink-light);border-radius:5px;overflow:hidden}
+.db-ing-fill{height:100%;border-radius:5px;display:flex;align-items:center;padding:0 7px;transition:width .55s cubic-bezier(.4,0,.2,1);width:0%}
+.db-ing-cnt{font-size:.63rem;font-weight:800;color:#fff;white-space:nowrap}
+@media(max-width:900px){.db-main{flex-direction:column;height:auto;overflow:auto}.db-right{width:100%}}
+
 /* YesStyle subcategory pills */
 .ys-pills{display:flex;gap:6px;align-items:center}
 .ys-pill{padding:6px 14px;border-radius:20px;border:1.5px solid var(--border);
@@ -629,31 +662,44 @@ function renderDashboard() {
     {code:'YS', label:'YesStyle'},
     {code:'AX', label:'AliExpress'},
   ];
-  let html = '<div class="dash">';
+  let prodHtml = '';
   platforms.forEach(({code, label}) => {
     const flag = (all.find(i=>i._country_code===code)||{})._country_flag || '';
     const top5 = all.filter(i=>i._country_code===code)
       .sort((a,b)=>(a.position||999)-(b.position||999)).slice(0,5);
-    html += `<div class="dash-col"><div class="dash-hdr"><span class="dash-flag">${flag}</span>${label}</div>`;
+    prodHtml += `<div class="dash-mini-col"><div class="dash-mini-hdr"><span>${flag}</span>${label}</div>`;
     top5.forEach((item,idx) => {
       const r=idx+1, rc=r===1?'r1':r===2?'r2':r===3?'r3':'rn';
-      const price=fmtPrice(item._price_value,item._price_currency);
       const th=item.thumbnailUrl;
-      const imgH=th?`<img src="${th}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`:'' ;
-      html+=`<a class="dash-item" href="${item.url||'#'}" target="_blank" rel="noopener">
-        <div class="dash-thumb">
-          ${imgH}<div class="dash-ph" style="${th?'display:none':''}">🧴</div>
-          <div class="dash-rnk ${rc}">${r}</div>
-        </div>
-        <div class="dash-info">
-          <div class="dash-name">${item.name||'No Name'}</div>
-          ${price?`<div class="dash-price">${price}</div>`:''}
-        </div></a>`;
+      const imgEl=th?`<img class="dash-mini-img" src="${th}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`:'' ;
+      const phEl=`<div class="dash-mini-ph" style="${th?'display:none':''}">🧴</div>`;
+      prodHtml+=`<a class="dash-mini-item" href="${item.url||'#'}" target="_blank" rel="noopener">
+        <div class="dash-mini-rank ${rc}">${r}</div>
+        ${imgEl}${phEl}
+        <div class="dash-mini-name">${item.name||'No Name'}</div>
+      </a>`;
     });
-    html += '</div>';
+    prodHtml += '</div>';
   });
-  html += '</div>';
-  return html;
+  return `<div class="db-main">
+    <div class="db-left">
+      <div class="db-section-hdr">🏆 플랫폼별 TOP 5</div>
+      <div class="dash-compact">${prodHtml}</div>
+    </div>
+    <div class="db-right">
+      <div class="db-chart-card">
+        <div class="db-card-title">📈 카테고리 분포 (전체)</div>
+        <div class="db-pie-body">
+          <canvas id="dbPieChart" width="185" height="185" style="flex-shrink:0"></canvas>
+          <div id="dbPieLegend" class="db-pie-legend"></div>
+        </div>
+      </div>
+      <div class="db-chart-card">
+        <div class="db-card-title">🧪 트렌딩 성분 TOP 10 (전체)</div>
+        <div class="db-ing-bars" id="dbIngBars"></div>
+      </div>
+    </div>
+  </div>`;
 }
 
 function render() {
@@ -662,6 +708,7 @@ function render() {
   if (country === 'DB') {
     toolbar.style.display = 'none';
     document.getElementById('gw').innerHTML = renderDashboard();
+    setTimeout(()=>{ drawDbPieChart(); drawDbIngChart(); }, 20);
     return;
   }
   if (country === 'CH') {
@@ -1009,6 +1056,127 @@ function renderIngredientChart() {
       <div class="ing-bars" id="ingBars"></div>
     </div>`;
   setTimeout(()=>drawIngredientChart(igPlatform), 20);
+}
+
+// ── Dashboard Charts (전체 데이터 기준) ───────────────────────────────────────
+function drawDbPieChart() {
+  const subCounts = {};
+  all.forEach(item => {
+    const {main, sub} = getDetailCategory(item);
+    if (!subCounts[main]) subCounts[main]={};
+    subCounts[main][sub]=(subCounts[main][sub]||0)+1;
+  });
+  const slices=[];
+  MAIN_ORDER_CH.forEach(main => {
+    if (!subCounts[main]) return;
+    const subs=Object.entries(subCounts[main]).sort((a,b)=>b[1]-a[1]);
+    const colors=MAIN_CAT_COLORS[main];
+    subs.forEach(([sub,count],i)=>slices.push({main,sub,count,color:colors[i%colors.length]}));
+  });
+  const total=slices.reduce((s,d)=>s+d.count,0);
+  if (!total) return;
+  const canvas=document.getElementById('dbPieChart');
+  if(!canvas) return;
+  const ctx=canvas.getContext('2d');
+  const W=canvas.width,H=canvas.height,cx=W/2,cy=H/2;
+  const r=Math.min(cx,cy)-8,ri=r*0.44;
+  let prog=0;
+  const animate=()=>{
+    ctx.clearRect(0,0,W,H);
+    let angle=-Math.PI/2;
+    slices.forEach(({count,color})=>{
+      const slice=(count/total)*2*Math.PI*Math.min(prog,1);
+      ctx.beginPath();ctx.moveTo(cx,cy);
+      ctx.arc(cx,cy,r,angle,angle+slice);
+      ctx.closePath();
+      ctx.fillStyle=color;ctx.fill();
+      ctx.strokeStyle='#fdf6f8';ctx.lineWidth=2;ctx.stroke();
+      angle+=slice;
+    });
+    if(prog>=1){
+      angle=-Math.PI/2;
+      slices.forEach(({count})=>{
+        const slice=(count/total)*2*Math.PI;
+        if(count/total>0.05){
+          const mid=angle+slice/2;
+          ctx.fillStyle='#fff';ctx.font='bold 10px system-ui';
+          ctx.textAlign='center';ctx.textBaseline='middle';
+          ctx.fillText(Math.round(count/total*100)+'%',cx+(r*.7)*Math.cos(mid),cy+(r*.7)*Math.sin(mid));
+        }
+        angle+=slice;
+      });
+    }
+    ctx.beginPath();ctx.arc(cx,cy,ri,0,2*Math.PI);
+    ctx.fillStyle='#fdf6f8';ctx.fill();
+    if(prog>=1){
+      ctx.fillStyle='#e8637a';ctx.font='bold 17px system-ui';
+      ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(total,cx,cy-8);
+      ctx.fillStyle='#888';ctx.font='10px system-ui';
+      ctx.fillText('개 제품',cx,cy+9);
+    }
+    prog+=0.055;
+    if(prog<1.05) requestAnimationFrame(animate);
+  };
+  animate();
+  const legend=document.getElementById('dbPieLegend');
+  if(!legend) return;
+  let html='';
+  MAIN_ORDER_CH.forEach(main=>{
+    const mainSlices=slices.filter(s=>s.main===main);
+    if(!mainSlices.length) return;
+    const mainTotal=mainSlices.reduce((s,d)=>s+d.count,0);
+    html+=`<div class="db-legend-grp">${main} <span style="color:var(--pink);font-size:.67rem">${Math.round(mainTotal/total*100)}%</span></div>`;
+    mainSlices.forEach(({sub,count,color})=>{
+      html+=`<div class="db-legend-item">
+        <span class="db-legend-dot" style="background:${color}"></span>
+        <span class="db-legend-label">${sub}</span>
+        <span class="db-legend-pct">${Math.round(count/total*100)}%</span>
+      </div>`;
+    });
+  });
+  legend.innerHTML=html;
+}
+
+function drawDbIngChart() {
+  const counts = {};
+  all.forEach(item => {
+    const text = (item.name||'') + ' ' + (item.categoryName||'') + ' ' + (item.categoryFullName||'');
+    INGREDIENT_LIST.forEach(({label,group,re}) => {
+      if (re.test(text)) {
+        if (!counts[label]) counts[label]={count:0,group};
+        counts[label].count++;
+      }
+    });
+  });
+  const sorted = Object.entries(counts)
+    .map(([label,{count,group}])=>({label,count,group}))
+    .sort((a,b)=>b.count-a.count)
+    .slice(0,10);
+  const maxCount = sorted[0]?.count || 1;
+  const container = document.getElementById('dbIngBars');
+  if (!container) return;
+  if (!sorted.length) {
+    container.innerHTML='<div style="color:var(--muted);font-size:.78rem;text-align:center;padding:12px">성분 데이터 없음</div>';
+    return;
+  }
+  container.innerHTML = sorted.map(({label,count,group})=>{
+    const pct = Math.round(count/maxCount*100);
+    const color = ING_GROUPS[group]||'#aaa';
+    return `<div class="db-ing-row" data-w="${pct}">
+      <div class="db-ing-label">${label}</div>
+      <div class="db-ing-track">
+        <div class="db-ing-fill" style="width:0%;background:${color}">
+          <span class="db-ing-cnt">${count}</span>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+  setTimeout(()=>{
+    container.querySelectorAll('.db-ing-row').forEach(row=>{
+      row.querySelector('.db-ing-fill').style.width = row.dataset.w + '%';
+    });
+  }, 40);
 }
 
 loadData();
