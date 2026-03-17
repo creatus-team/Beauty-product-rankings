@@ -474,16 +474,18 @@ select.fs:focus{border-color:var(--pink);background:#fff}
 .db-left{flex:1.4;display:flex;flex-direction:column;overflow:hidden;min-width:0}
 .db-right{width:370px;flex-shrink:0;display:flex;flex-direction:column;gap:12px;overflow-y:auto;padding-right:2px}
 .db-section-hdr{font-size:.88rem;font-weight:800;color:var(--pink);margin-bottom:10px}
-.dash-compact{display:flex;gap:10px;flex:1;overflow-x:auto;align-items:flex-start;padding-bottom:4px}
-.dash-mini-col{flex:1;min-width:155px;max-width:200px;background:var(--surface);border-radius:12px;border:1px solid var(--border);overflow:hidden;box-shadow:var(--shadow);display:flex;flex-direction:column;flex-shrink:0}
-.dash-mini-hdr{padding:7px 10px;display:flex;align-items:center;gap:6px;background:linear-gradient(135deg,var(--pink-light) 0%,#fff 100%);border-bottom:2px solid var(--pink-mid);font-weight:800;font-size:.73rem;color:var(--pink);white-space:nowrap}
-.dash-mini-item{display:flex;align-items:center;gap:7px;padding:6px 8px;border-bottom:1px solid var(--border);text-decoration:none;color:inherit;transition:background .15s}
+.dash-compact{display:flex;gap:10px;flex:1;overflow-x:auto;overflow-y:auto;align-items:flex-start;padding-bottom:4px}
+.dash-mini-col{flex:1;min-width:160px;max-width:210px;background:var(--surface);border-radius:12px;border:1px solid var(--border);overflow:hidden;box-shadow:var(--shadow);display:flex;flex-direction:column;flex-shrink:0}
+.dash-mini-hdr{padding:8px 11px;display:flex;align-items:center;gap:6px;background:linear-gradient(135deg,var(--pink-light) 0%,#fff 100%);border-bottom:2px solid var(--pink-mid);font-weight:800;font-size:.74rem;color:var(--pink);white-space:nowrap}
+.dash-mini-item{display:flex;flex-direction:column;text-decoration:none;color:inherit;border-bottom:1px solid var(--border);transition:background .15s;overflow:hidden}
 .dash-mini-item:hover{background:var(--pink-light)}
 .dash-mini-item:last-child{border-bottom:none}
-.dash-mini-rank{font-size:.62rem;font-weight:900;color:#fff;width:19px;height:19px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0}
-.dash-mini-img{width:46px;height:46px;border-radius:7px;object-fit:contain;background:#f9f3f5;flex-shrink:0}
-.dash-mini-ph{width:46px;height:46px;border-radius:7px;background:#f9f3f5;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:1.3rem}
-.dash-mini-name{font-size:.68rem;font-weight:600;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;color:var(--text);flex:1;min-width:0}
+.dash-mini-thumb{width:100%;padding-top:78%;position:relative;background:#f9f3f5;overflow:hidden}
+.dash-mini-thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;padding:10px;transition:transform .3s}
+.dash-mini-item:hover .dash-mini-thumb img{transform:scale(1.04)}
+.dash-mini-ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:2rem;color:var(--pink-mid)}
+.dash-mini-rank{position:absolute;top:7px;left:7px;font-size:.68rem;font-weight:900;color:#fff;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.25);z-index:2}
+.dash-mini-name{padding:8px 10px 10px;font-size:.76rem;font-weight:700;line-height:1.4;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;color:var(--text)}
 .db-chart-card{background:var(--surface);border-radius:14px;border:1px solid var(--border);box-shadow:var(--shadow);padding:14px 16px;flex-shrink:0}
 .db-card-title{font-size:.82rem;font-weight:800;color:var(--pink);margin-bottom:10px}
 .db-pie-body{display:flex;gap:12px;align-items:flex-start}
@@ -768,11 +770,13 @@ function renderDashboard() {
     top5.forEach((item,idx) => {
       const r=idx+1, rc=r===1?'r1':r===2?'r2':r===3?'r3':'rn';
       const th=item.thumbnailUrl;
-      const imgEl=th?`<img class="dash-mini-img" src="${th}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`:'' ;
+      const imgEl=th?`<img src="${th}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`:'' ;
       const phEl=`<div class="dash-mini-ph" style="${th?'display:none':''}">🧴</div>`;
       prodHtml+=`<a class="dash-mini-item" href="${item.url||'#'}" target="_blank" rel="noopener">
-        <div class="dash-mini-rank ${rc}">${r}</div>
-        ${imgEl}${phEl}
+        <div class="dash-mini-thumb">
+          ${imgEl}${phEl}
+          <div class="dash-mini-rank ${rc}">${r}</div>
+        </div>
         <div class="dash-mini-name">${item.name||'No Name'}</div>
       </a>`;
     });
