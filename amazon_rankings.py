@@ -249,6 +249,104 @@ def fetch_oliveyoung():
         print(f"[OliveYoung] Top in Korea failed: {e}")
     return items + korea_items
 
+def _classify_qoo10(name):
+    """Qoo10 제품명(일본어+영어)으로 서브카테고리 분류"""
+    n = name.lower()
+    # 헤어케어
+    if any(k in n for k in ['シャンプー','shampoo','コンディショナー','conditioner','トリートメント','treatment','ヘアオイル','hair oil','ヘアマスク','hair mask','ヘアケア','hair care','ヘアパック','育毛','発毛','アナゲン']):
+        return 'ヘアケア'
+    # 메이크업
+    if any(k in n for k in ['リップ','lip','アイシャドウ','eyeshadow','マスカラ','mascara','ファンデ','foundation','チーク','blush','コンシーラー','concealer','アイライナー','eyeliner','ハイライト','highlighter','カラコン','ビューラー','眉','アイブロウ','プライマー','カラーコレクター','フェイスパウダー','パウダー']):
+        return 'メイクアップ'
+    # 스킨케어 (뷰티 기본값)
+    return 'スキンケア'
+
+def fetch_qoo10():
+    """Qoo10 Japan 뷰티 베스트셀러 (Playwright 필요, 없으면 빈 리스트)"""
+    import re as _re
+    try:
+        from playwright.sync_api import sync_playwright
+        from bs4 import BeautifulSoup
+    except ImportError:
+        print("[Qoo10] playwright/bs4 not installed, skipping")
+        return []
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page(
+                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            )
+            page.set_extra_http_headers({"Accept-Language": "ja-JP,ja;q=0.9,en;q=0.8"})
+            page.goto("https://www.qoo10.jp/gmkt.inc/Bestsellers/?g=2", timeout=30000)
+            page.wait_for_load_state("networkidle", timeout=15000)
+            html = page.content()
+            browser.close()
+
+        soup = BeautifulSoup(html, 'html.parser')
+        raw_items = soup.find_all('li', id=lambda x: x and x.startswith('g_'))
+        items = []
+        for li in raw_items[:200]:
+            rank_el = li.find('span', class_='rank')
+            rank = int(rank_el.get_text(strip=True)) if rank_el else None
+            img_el = li.find('a', class_='thmb')
+            img_src = img_el.find('img')['src'] if img_el and img_el.find('img') else None
+            name_el = li.find('a', class_='tt')
+            name = (name_el.get('title') or name_el.get_text(strip=True)) if name_el else ''
+            brand_el = li.find('a', class_='txt_brand')
+            brand = brand_el.get('title', '').strip() if brand_el else ''
+            url_el = name_el or img_el
+            product_url = (url_el.get('href', '') if url_el else '') or ''
+            prc_div = li.find('div', class_='prc')
+            price = None
+            if prc_div:
+                strong = prc_div.find('strong')
+                if strong:
+                    try:
+                        price = float(strong.get_text(strip=True).replace('円','').replace(',',''))
+                    except Exception:
+                        pass
+            review_el = li.find('span', class_='review_total_count')
+            review_count = None
+            if review_el:
+                m = _re.search(r'\d[\d,]*', review_el.get_text())
+                if m:
+                    review_count = int(m.group().replace(',', ''))
+            sold_el = li.find('div', class_='sold')
+            sold = None
+            if sold_el:
+                em = sold_el.find('em')
+                if em:
+                    try:
+                        sold = int(em.get_text(strip=True).replace(',', ''))
+                    except Exception:
+                        pass
+            full_name = f"{brand} {name}".strip() if brand else name
+            subcat = _classify_qoo10(full_name)
+            product_id = li.get('id', '').replace('g_', '')
+            items.append({
+                "name": full_name,
+                "url": product_url if product_url.startswith('http') else f"https://www.qoo10.jp{product_url}",
+                "asin": product_id,
+                "position": rank,
+                "thumbnailUrl": img_src,
+                "stars": None,
+                "reviewsCount": review_count,
+                "categoryName": subcat,
+                "categoryFullName": f"Qoo10 {subcat} Bestsellers",
+                "_country_code": "QJ",
+                "_country_flag": "🛒",
+                "_country_name": "Qoo10 Japan",
+                "_qj_subcategory": subcat,
+                "_price_value": price,
+                "_price_currency": "¥",
+                "_sold_count": sold,
+            })
+        print(f"[Qoo10] fetched {len(items)} beauty items")
+        return items
+    except Exception as e:
+        print(f"[Qoo10] failed: {e}")
+        return []
+
 def detect_country(item):
     for field in ("input", "categoryUrl", "url"):
         val = item.get(field) or ""
@@ -288,6 +386,10 @@ def fetch_from_apify(refresh=False):
     oy_items = fetch_oliveyoung()
     print(f"[OliveYoung] fetched {len(oy_items)} items")
     all_items.extend(oy_items)
+    # Qoo10 Japan 추가
+    qj_items = fetch_qoo10()
+    print(f"[Qoo10] fetched {len(qj_items)} items")
+    all_items.extend(qj_items)
     return all_items
 
 def load_cache():
@@ -605,17 +707,23 @@ select.fs:focus{border-color:var(--pink);background:#fff}
     <button class="ys-pill" data-sub="Top orders" onclick="setOySub(this)">Top orders</button>
     <button class="ys-pill" data-sub="Top in Korea" onclick="setOySub(this)">Top in Korea</button>
   </div>
+  <div class="ys-pills" id="qjPills" style="display:none">
+    <button class="ys-pill active" data-sub="All" onclick="setQjSub(this)">All</button>
+    <button class="ys-pill" data-sub="スキンケア" onclick="setQjSub(this)">스킨케어</button>
+    <button class="ys-pill" data-sub="メイクアップ" onclick="setQjSub(this)">메이크업</button>
+    <button class="ys-pill" data-sub="ヘアケア" onclick="setQjSub(this)">헤어케어</button>
+  </div>
   <span class="rc" id="rc"></span>
 </div>
 
 <div class="gw" id="gw"></div>
 
 <script>
-let all = [], country = 'DB', ysSub = 'All Beauty', oySub = 'All';
+let all = [], country = 'DB', ysSub = 'All Beauty', oySub = 'All', qjSub = 'All';
 
 // country order: ALL first, then US, UK, JP, then others
-const ORDER = ['DB','CH','IG','ALL','US','UK','JP','YS','AX','OY','DE','FR','CA','AU','IT','ES'];
-const TAB_LABELS = {'DB':'📊 전체 대시보드','CH':'📈 카테고리 분석','IG':'🧪 성분 트렌드','ALL':'전체','YS':'YesStyle','AX':'AliExpress','OY':'🌿 OliveYoung'};
+const ORDER = ['DB','CH','IG','ALL','US','UK','JP','YS','AX','OY','QJ','DE','FR','CA','AU','IT','ES'];
+const TAB_LABELS = {'DB':'📊 전체 대시보드','CH':'📈 카테고리 분석','IG':'🧪 성분 트렌드','ALL':'전체','YS':'YesStyle','AX':'AliExpress','OY':'🌿 OliveYoung','QJ':'🛒 Qoo10 Japan'};
 
 async function loadData() {
   show('랭킹 데이터 불러오는 중...');
@@ -679,7 +787,7 @@ function buildTabs() {
     btn.className = 'ctab' + (code===country ? ' active' : '');
     const cntHtml = (code==='DB'||code==='CH'||code==='IG') ? '' : `<span class="cnt">${counts[code]||0}</span>`;
     btn.innerHTML = (flag ? `<span class="flag">${flag}</span>` : '') + label + cntHtml;
-    btn.onclick = () => { country=code; ysSub='All Beauty'; oySub='All'; resetYsPills(); resetOyPills(); buildTabs(); render(); };
+    btn.onclick = () => { country=code; ysSub='All Beauty'; oySub='All'; qjSub='All'; resetYsPills(); resetOyPills(); resetQjPills(); buildTabs(); render(); };
     el.appendChild(btn);
   });
 }
@@ -702,6 +810,7 @@ function resetYsPills() {
 function updateYsPills() {
   document.getElementById('ysPills').style.display = country === 'YS' ? 'flex' : 'none';
   document.getElementById('oyPills').style.display = country === 'OY' ? 'flex' : 'none';
+  document.getElementById('qjPills').style.display = country === 'QJ' ? 'flex' : 'none';
 }
 
 function setOySub(btn) {
@@ -714,6 +823,20 @@ function setOySub(btn) {
 function resetOyPills() {
   oySub = 'All';
   document.querySelectorAll('#oyPills .ys-pill').forEach(p => {
+    p.classList.toggle('active', p.dataset.sub === 'All');
+  });
+}
+
+function setQjSub(btn) {
+  qjSub = btn.dataset.sub;
+  document.querySelectorAll('#qjPills .ys-pill').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  render();
+}
+
+function resetQjPills() {
+  qjSub = 'All';
+  document.querySelectorAll('#qjPills .ys-pill').forEach(p => {
     p.classList.toggle('active', p.dataset.sub === 'All');
   });
 }
@@ -738,6 +861,7 @@ function getFiltered() {
     if (country!=='ALL' && i._country_code!==country) return false;
     if (country==='YS' && ysSub!=='All Beauty' && i._ys_subcategory!==ysSub) return false;
     if (country==='OY' && oySub!=='All' && i._oy_subcategory!==oySub) return false;
+    if (country==='QJ' && qjSub!=='All' && i._qj_subcategory!==qjSub) return false;
     if (q && !(i.name||'').toLowerCase().includes(q) && !(i.asin||'').toLowerCase().includes(q)) return false;
     return true;
   });
@@ -760,6 +884,7 @@ function renderDashboard() {
     {code:'YS', label:'YesStyle'},
     {code:'AX', label:'AliExpress'},
     {code:'OY', label:'OliveYoung', sub:'Top orders'},
+    {code:'QJ', label:'Qoo10 JP'},
   ];
   let prodHtml = '';
   platforms.forEach(({code, label, sub}) => {
@@ -893,6 +1018,29 @@ function getDetailCategory(item) {
       return {main:'스킨케어', sub:'기타 스킨케어'};
     }
     return {main:'기타', sub:'기타'};
+  }
+  if (code === 'QJ') {
+    const sub = item._qj_subcategory || '';
+    if (sub === 'ヘアケア') {
+      if (/シャンプー|shampoo/.test(name)) return {main:'헤어케어', sub:'샴푸'};
+      if (/コンディショナー|conditioner|トリートメント|treatment/.test(name)) return {main:'헤어케어', sub:'컨디셔너'};
+      return {main:'헤어케어', sub:'헤어케어'};
+    }
+    if (sub === 'メイクアップ') {
+      if (/リップ|lip/.test(name)) return {main:'메이크업', sub:'립메이크업'};
+      if (/アイシャドウ|eyeshadow|アイライナー|eyeliner|マスカラ|mascara/.test(name)) return {main:'메이크업', sub:'아이메이크업'};
+      if (/ファンデ|foundation|bb|cc|クッション|cushion/.test(name)) return {main:'메이크업', sub:'파운데이션/BB'};
+      return {main:'메이크업', sub:'기타 메이크업'};
+    }
+    // スキンケア (default)
+    if (/美容液|serum|essence|セラム/.test(name)) return {main:'스킨케어', sub:'세럼/에센스'};
+    if (/化粧水|toner|lotion/.test(name)) return {main:'스킨케어', sub:'토너/스킨'};
+    if (/日焼け|サンクリーム|sunscreen|spf|uv/.test(name)) return {main:'스킨케어', sub:'선케어'};
+    if (/マスク|mask|パック|pack/.test(name)) return {main:'스킨케어', sub:'마스크팩'};
+    if (/パッチ|patch/.test(name)) return {main:'스킨케어', sub:'패치'};
+    if (/洗顔|クレンジング|cleanser|foam/.test(name)) return {main:'스킨케어', sub:'클렌저'};
+    if (/クリーム|cream|moistur|emulsion|乳液/.test(name)) return {main:'스킨케어', sub:'로션/크림'};
+    return {main:'스킨케어', sub:'기타 스킨케어'};
   }
   if (code === 'AX' || code === 'OY') {
     if (/shampoo|conditioner|hair/.test(name)) return {main:'헤어케어', sub:'헤어케어'};
@@ -1034,6 +1182,7 @@ function renderChart() {
     {code:'YS',label:'🍀 YesStyle'},
     {code:'AX',label:'🛍️ AliExpress'},
     {code:'OY',label:'🌿 OliveYoung'},
+    {code:'QJ',label:'🛒 Qoo10 JP'},
   ];
   document.getElementById('gw').innerHTML=`
     <div class="chart-wrap">
@@ -1148,6 +1297,7 @@ function renderIngredientChart() {
     {code:'YS',label:'🍀 YesStyle'},
     {code:'AX',label:'🛍️ AliExpress'},
     {code:'OY',label:'🌿 OliveYoung'},
+    {code:'QJ',label:'🛒 Qoo10 JP'},
   ];
   const grpLegend = Object.entries(ING_GROUPS).map(([g,c])=>
     `<div class="ing-grp"><span class="ing-grp-dot" style="background:${c}"></span>${g}</div>`
