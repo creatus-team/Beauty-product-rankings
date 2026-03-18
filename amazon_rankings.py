@@ -8,6 +8,11 @@ Amazon Beauty Rankings Dashboard
 from flask import Flask, jsonify, render_template_string, request
 import json, os, requests, glob, subprocess, sys
 from datetime import datetime
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 app = Flask(__name__)
 
@@ -1432,6 +1437,19 @@ select.fs:focus{border-color:var(--pink);background:#fff}
       <button class="clear-btn" onclick="vClearXhsFilters()">Clear All</button>
     </aside>
     <main class="v-main">
+      <div class="ys-pills" id="xhsCatPills" style="margin-bottom:10px">
+        <button class="ys-pill active" data-cat="All" onclick="setXhsCat(this)">전체</button>
+        <button class="ys-pill" data-cat="스킨케어" onclick="setXhsCat(this)">스킨케어</button>
+        <button class="ys-pill" data-cat="메이크업" onclick="setXhsCat(this)">메이크업</button>
+        <button class="ys-pill" data-cat="헤어케어" onclick="setXhsCat(this)">헤어케어</button>
+        <button class="ys-pill" data-cat="종합" onclick="setXhsCat(this)">종합/바이럴</button>
+      </div>
+      <div class="ys-pills" id="xhsPeriodPills" style="margin-bottom:14px">
+        <span style="font-size:.75rem;font-weight:700;color:var(--muted);margin-right:2px">기간:</span>
+        <button class="ys-pill active" data-period="all" onclick="setXhsPeriod(this)">전체</button>
+        <button class="ys-pill" data-period="30" onclick="setXhsPeriod(this)">최근 30일</button>
+        <button class="ys-pill" data-period="7" onclick="setXhsPeriod(this)">최근 7일</button>
+      </div>
       <div class="stats-bar" id="xhs-stats-bar">
         <div class="stat-chip"><div class="n" id="xhss-posts" style="color:#ff2442">—</div><div class="l">Posts</div></div>
         <div class="stat-chip"><div class="n" id="xhss-likes" style="color:#ff2442">—</div><div class="l">Total Likes</div></div>
@@ -2271,6 +2289,8 @@ let vxhsFiltered  = [];
 let vxhsDateRange = 'all';
 let vxhsActiveTab = 'posts';
 let vxhsInitialized = false;
+let xhsCat    = 'All';
+let xhsPeriod = 'all';
 
 // ── Utilities ──
 function vFmt(n) {
@@ -3376,6 +3396,20 @@ async function vLoadXhsAllData() {
   vApplyXhsFilters();
 }
 
+function setXhsCat(btn) {
+  xhsCat = btn.dataset.cat;
+  document.querySelectorAll('#xhsCatPills .ys-pill').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  vApplyXhsFilters();
+}
+
+function setXhsPeriod(btn) {
+  xhsPeriod = btn.dataset.period;
+  document.querySelectorAll('#xhsPeriodPills .ys-pill').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  vApplyXhsFilters();
+}
+
 function vSetXhsDateRange(val, btn) {
   vxhsDateRange = val;
   document.querySelectorAll('#v-xhs-hub .date-btn').forEach(b => b.classList.remove('active'));
@@ -3388,9 +3422,12 @@ function vApplyXhsFilters() {
   const type    = document.getElementById('xhsf-type').value;
   const dataset = document.getElementById('xhs-date-pick').value;
   const now = Date.now(); const dayMs = 86400000;
-  const cutoff = vxhsDateRange === 'all' ? 0 : now - (vxhsDateRange * dayMs);
+  // period pills 우선, 없으면 사이드바 date range
+  const periodDays = xhsPeriod !== 'all' ? parseInt(xhsPeriod) : (vxhsDateRange !== 'all' ? vxhsDateRange : 0);
+  const cutoff = periodDays ? now - (periodDays * dayMs) : 0;
   vxhsFiltered = vxhsAllData.filter(p => {
     if (dataset && p._dataset !== dataset) return false;
+    if (xhsCat !== 'All' && p.category !== xhsCat) return false;
     if (type && p.type !== type) return false;
     if (creator && !(p.creator?.username||'').toLowerCase().includes(creator)) return false;
     if (keyword && !(p.title||'').toLowerCase().includes(keyword)) return false;
@@ -3404,9 +3441,13 @@ function vApplyXhsFilters() {
 function vClearXhsFilters() {
   ['xhsf-creator','xhsf-keyword'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('xhsf-type').value = '';
-  vxhsDateRange = 'all';
+  vxhsDateRange = 'all'; xhsCat = 'All'; xhsPeriod = 'all';
   document.querySelectorAll('#v-xhs-hub .date-btn').forEach(b => b.classList.remove('active'));
   document.querySelector('#v-xhs-hub .date-btn').classList.add('active');
+  document.querySelectorAll('#xhsCatPills .ys-pill').forEach(p => p.classList.remove('active'));
+  document.querySelector('#xhsCatPills .ys-pill').classList.add('active');
+  document.querySelectorAll('#xhsPeriodPills .ys-pill').forEach(p => p.classList.remove('active'));
+  document.querySelector('#xhsPeriodPills .ys-pill').classList.add('active');
   vApplyXhsFilters();
 }
 
