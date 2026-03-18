@@ -601,6 +601,26 @@ def api_run_twitter():
     subprocess.Popen([sys.executable, script], stdout=log, stderr=subprocess.STDOUT)
     return jsonify({"ok": True})
 
+@app.route("/api/xhs/dates")
+def api_xhs_dates():
+    files = sorted(glob.glob(os.path.join(_SCRIPT_DIR, "xhs_data_*.json")), reverse=True)
+    return jsonify([os.path.basename(f).replace("xhs_data_","").replace(".json","") for f in files])
+
+@app.route("/api/xhs/data/<date>")
+def api_xhs_data_date(date):
+    path = os.path.join(_SCRIPT_DIR, f"xhs_data_{date}.json")
+    if not os.path.exists(path):
+        return jsonify([])
+    with open(path, encoding="utf-8") as f:
+        return jsonify(json.load(f))
+
+@app.route("/api/run/xhs", methods=["POST"])
+def api_run_xhs():
+    script = os.path.join(_SCRIPT_DIR, "kbeauty_xhs_scraper.py")
+    log    = open(os.path.join(_SCRIPT_DIR, "last_xhs_run.log"), "w")
+    subprocess.Popen([sys.executable, script], stdout=log, stderr=subprocess.STDOUT)
+    return jsonify({"ok": True})
+
 @app.route("/")
 def index():
     return render_template_string(HTML)
@@ -857,6 +877,10 @@ select.fs:focus{border-color:var(--pink);background:#fff}
 #video-hub .plat-btn.active{background:white}
 #video-hub .plat-btn.tiktok-btn.active{color:#c97d8a}
 #video-hub .plat-btn.twitter-btn.active{color:#1d9bf0}
+#video-hub .plat-btn.xhs-btn.active{color:#ff2442}
+#video-hub .vh-subheader.xhs{background:linear-gradient(135deg,#ff6b7a 0%,#ff2442 100%)}
+#video-hub .vh-subheader.xhs .run-btn{color:#ff2442}
+#video-hub .vh-subheader.xhs .run-btn:hover{background:#fff0f2}
 #video-hub .run-btn{background:white;border:none;padding:8px 18px;
   border-radius:8px;font-weight:700;cursor:pointer;font-size:0.82rem;transition:all 0.2s}
 #video-hub .vh-subheader.tiktok .run-btn{color:#c97d8a}
@@ -1177,6 +1201,7 @@ select.fs:focus{border-color:var(--pink);background:#fff}
     <div class="platform-switch">
       <button class="plat-btn tiktok-btn active" id="btn-tiktok" onclick="vSwitchPlatform('tiktok')">🎵 TikTok</button>
       <button class="plat-btn twitter-btn" id="btn-twitter" onclick="vSwitchPlatform('twitter')">𝕏 Twitter</button>
+      <button class="plat-btn xhs-btn" id="btn-xhs" onclick="vSwitchPlatform('xhs')">📕 小红书</button>
     </div>
     <button class="run-btn" id="v-run-btn" onclick="vTriggerScrape()">Run New Scrape</button>
   </div>
@@ -1362,6 +1387,68 @@ select.fs:focus{border-color:var(--pink);background:#fff}
       <div id="vx-panel-tweets"></div>
       <div id="vx-panel-xcreators" style="display:none"></div>
       <div id="vx-panel-xhashtags" style="display:none"></div>
+    </main>
+  </div>
+</div>
+
+<div id="v-xhs-hub" style="display:none">
+  <div class="v-layout">
+    <aside class="v-sidebar" style="border-right-color:#ffd0d5">
+      <div class="filter-section">
+        <span class="filter-label" style="color:#ff2442">Date Range</span>
+        <div class="date-btns">
+          <button class="date-btn active" onclick="vSetXhsDateRange('all', this)">All Time</button>
+          <button class="date-btn" onclick="vSetXhsDateRange(1, this)">Today</button>
+          <button class="date-btn" onclick="vSetXhsDateRange(7, this)">7 Days</button>
+          <button class="date-btn" onclick="vSetXhsDateRange(30, this)">30 Days</button>
+        </div>
+      </div>
+      <hr class="divider">
+      <div class="filter-section">
+        <span class="filter-label" style="color:#ff2442">Search</span>
+        <div class="filter-group">
+          <input type="text" id="xhsf-creator" placeholder="Creator username...">
+          <input type="text" id="xhsf-keyword" placeholder="Title keyword...">
+        </div>
+      </div>
+      <hr class="divider">
+      <div class="filter-section">
+        <span class="filter-label" style="color:#ff2442">Type</span>
+        <select id="xhsf-type" onchange="vApplyXhsFilters()">
+          <option value="">All Types</option>
+          <option value="video">Video</option>
+          <option value="image">Image / Note</option>
+        </select>
+      </div>
+      <hr class="divider">
+      <div class="filter-section">
+        <span class="filter-label" style="color:#ff2442">Sort By</span>
+        <select id="xhs-sort-select" onchange="vRenderXhsPosts()">
+          <option value="likes">Likes</option>
+          <option value="date">Date (Newest)</option>
+        </select>
+      </div>
+      <button class="apply-btn" style="background:#ff2442" onclick="vApplyXhsFilters()">Apply Filters</button>
+      <button class="clear-btn" onclick="vClearXhsFilters()">Clear All</button>
+    </aside>
+    <main class="v-main">
+      <div class="stats-bar" id="xhs-stats-bar">
+        <div class="stat-chip"><div class="n" id="xhss-posts" style="color:#ff2442">—</div><div class="l">Posts</div></div>
+        <div class="stat-chip"><div class="n" id="xhss-likes" style="color:#ff2442">—</div><div class="l">Total Likes</div></div>
+        <div class="stat-chip"><div class="n" id="xhss-creators" style="color:#ff2442">—</div><div class="l">Creators</div></div>
+        <div class="stat-chip"><div class="n" id="xhss-videos" style="color:#ff2442">—</div><div class="l">Videos</div></div>
+      </div>
+      <div class="tabs" id="xhs-tabs">
+        <button class="tab active" style="--ac:#ff2442" onclick="vSwitchXhsTab('posts', this)">🔥 Viral Posts</button>
+        <button class="tab" style="--ac:#ff2442" onclick="vSwitchXhsTab('creators', this)">👤 Top Creators</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;background:white;padding:10px 16px;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.05)">
+        <span style="font-size:0.8rem;color:#888">Dataset:</span>
+        <select id="xhs-date-pick" style="width:auto;flex:1;padding:6px 10px;font-size:0.82rem"></select>
+        <div id="xhs-result-count" style="margin-left:auto;font-size:0.8rem;color:#aaa"></div>
+      </div>
+      <div id="xhs-panel-posts"></div>
+      <div id="xhs-panel-creators" style="display:none"></div>
     </main>
   </div>
 </div>
@@ -2178,6 +2265,12 @@ let vxDateRange = 'all';
 let vxActiveTab = 'tweets';
 let vxAllDates  = [];
 let vPlatform   = 'tiktok';
+let vxhsAllDates  = [];
+let vxhsAllData   = [];
+let vxhsFiltered  = [];
+let vxhsDateRange = 'all';
+let vxhsActiveTab = 'posts';
+let vxhsInitialized = false;
 
 // ── Utilities ──
 function vFmt(n) {
@@ -2916,7 +3009,7 @@ function vRenderAudio() {
 async function vTriggerScrape() {
   const btn = document.getElementById('v-run-btn');
   btn.disabled = true; btn.textContent = 'Running...';
-  const endpoint = vPlatform === 'twitter' ? '/api/run/twitter' : '/api/run';
+  const endpoint = vPlatform === 'twitter' ? '/api/run/twitter' : vPlatform === 'xhs' ? '/api/run/xhs' : '/api/run';
   vToast('Scrape started — takes ~5-10 min. Page will refresh when done.', 10000);
   const r = await fetch(endpoint, { method: 'POST' });
   await r.json();
@@ -2928,6 +3021,14 @@ async function vTriggerScrape() {
         clearInterval(poll);
         btn.disabled = false; btn.textContent = 'Run New Scrape';
         vAllDates = dates; await vLoadAllData(); vToast('New TikTok data loaded!', 4000);
+      }
+    } else if (vPlatform === 'xhs') {
+      const dr = await fetch('/api/xhs/dates');
+      const dates = await dr.json();
+      if (dates[0] !== vxhsAllDates[0]) {
+        clearInterval(poll);
+        btn.disabled = false; btn.textContent = 'Run New Scrape';
+        vxhsAllDates = dates; await vLoadXhsAllData(); vToast('New XHS data loaded!', 4000);
       }
     } else {
       const dr = await fetch('/api/x/dates');
@@ -2947,22 +3048,29 @@ function vSwitchPlatform(p) {
   const hdr = document.getElementById('vh-subheader');
   const tiktokHub = document.getElementById('v-tiktok-layout');
   const twitterHub = document.getElementById('v-twitter-hub');
+  const xhsHub = document.getElementById('v-xhs-hub');
   document.getElementById('btn-tiktok').classList.toggle('active', p === 'tiktok');
   document.getElementById('btn-twitter').classList.toggle('active', p === 'twitter');
+  document.getElementById('btn-xhs').classList.toggle('active', p === 'xhs');
+  tiktokHub.style.display = 'none';
+  twitterHub.style.display = 'none';
+  xhsHub.style.display = 'none';
   if (p === 'tiktok') {
     hdr.className = 'vh-subheader tiktok';
     document.getElementById('vh-hub-title').textContent = 'K-Beauty TikTok Hub';
     tiktokHub.style.display = 'flex';
-    twitterHub.style.display = 'none';
-    document.getElementById('v-run-btn').textContent = 'Run New Scrape';
-  } else {
+  } else if (p === 'twitter') {
     hdr.className = 'vh-subheader twitter';
     document.getElementById('vh-hub-title').textContent = 'K-Beauty X (Twitter) Hub';
-    tiktokHub.style.display = 'none';
     twitterHub.style.display = 'block';
-    document.getElementById('v-run-btn').textContent = 'Run New Scrape';
     if (!vxAllDates.length) vInitTwitter();
+  } else {
+    hdr.className = 'vh-subheader xhs';
+    document.getElementById('vh-hub-title').textContent = 'K-Beauty 小红书 Hub';
+    xhsHub.style.display = 'block';
+    if (!vxhsInitialized) { vInitXhs(); vxhsInitialized = true; }
   }
+  document.getElementById('v-run-btn').textContent = 'Run New Scrape';
 }
 
 // ── Twitter init & data ──
@@ -3229,6 +3337,166 @@ function vHideVideoPreview() {
   previewEl.classList.remove('active');
   previewEl.innerHTML = '';
   vPreviewActive = false;
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// XHS (小红书) HUB
+// ══════════════════════════════════════════════════════════════════════════
+
+async function vInitXhs() {
+  const r = await fetch('/api/xhs/dates');
+  vxhsAllDates = await r.json();
+  const sel = document.getElementById('xhs-date-pick');
+  sel.innerHTML = '';
+  vxhsAllDates.forEach(d => {
+    const o = document.createElement('option');
+    o.value = d; o.textContent = d; sel.appendChild(o);
+  });
+  if (vxhsAllDates.length) {
+    await vLoadXhsAllData();
+  } else {
+    document.getElementById('vh-last-updated').textContent = 'No XHS data yet — click Run New Scrape';
+    document.getElementById('xhs-panel-posts').innerHTML =
+      '<div class="empty"><div class="icon">📕</div><p>No 小红书 data yet.</p><p style="margin-top:8px">Click <b>Run New Scrape</b> to pull K-beauty posts.</p></div>';
+  }
+}
+
+async function vLoadXhsAllData() {
+  vxhsAllData = [];
+  const seen = new Set();
+  for (const date of vxhsAllDates) {
+    const r = await fetch('/api/xhs/data/' + date);
+    const items = await r.json();
+    items.forEach(p => {
+      if (!seen.has(p.id)) { seen.add(p.id); vxhsAllData.push({...p, _dataset: date}); }
+    });
+  }
+  document.getElementById('vh-last-updated').textContent =
+    vxhsAllData.length + ' posts across ' + vxhsAllDates.length + ' dataset(s) · Latest: ' + (vxhsAllDates[0]||'—');
+  vApplyXhsFilters();
+}
+
+function vSetXhsDateRange(val, btn) {
+  vxhsDateRange = val;
+  document.querySelectorAll('#v-xhs-hub .date-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+function vApplyXhsFilters() {
+  const creator = document.getElementById('xhsf-creator').value.trim().toLowerCase();
+  const keyword = document.getElementById('xhsf-keyword').value.trim().toLowerCase();
+  const type    = document.getElementById('xhsf-type').value;
+  const dataset = document.getElementById('xhs-date-pick').value;
+  const now = Date.now(); const dayMs = 86400000;
+  const cutoff = vxhsDateRange === 'all' ? 0 : now - (vxhsDateRange * dayMs);
+  vxhsFiltered = vxhsAllData.filter(p => {
+    if (dataset && p._dataset !== dataset) return false;
+    if (type && p.type !== type) return false;
+    if (creator && !(p.creator?.username||'').toLowerCase().includes(creator)) return false;
+    if (keyword && !(p.title||'').toLowerCase().includes(keyword)) return false;
+    if (cutoff && p.created_at && new Date(p.created_at).getTime() < cutoff) return false;
+    return true;
+  });
+  vUpdateXhsStats();
+  vRenderXhsActiveTab();
+}
+
+function vClearXhsFilters() {
+  ['xhsf-creator','xhsf-keyword'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('xhsf-type').value = '';
+  vxhsDateRange = 'all';
+  document.querySelectorAll('#v-xhs-hub .date-btn').forEach(b => b.classList.remove('active'));
+  document.querySelector('#v-xhs-hub .date-btn').classList.add('active');
+  vApplyXhsFilters();
+}
+
+function vUpdateXhsStats() {
+  const totalLikes = vxhsFiltered.reduce((s,p) => s + (parseInt(p.stats?.likes)||0), 0);
+  const creators   = new Set(vxhsFiltered.map(p => p.creator?.userId).filter(Boolean)).size;
+  const videos     = vxhsFiltered.filter(p => p.type === 'video').length;
+  document.getElementById('xhss-posts').textContent    = vFmt(vxhsFiltered.length);
+  document.getElementById('xhss-likes').textContent    = vFmt(totalLikes);
+  document.getElementById('xhss-creators').textContent = creators;
+  document.getElementById('xhss-videos').textContent   = videos;
+  document.getElementById('xhs-result-count').textContent = vxhsFiltered.length + ' posts';
+}
+
+function vSwitchXhsTab(tab, btn) {
+  vxhsActiveTab = tab;
+  document.querySelectorAll('#xhs-tabs .tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  vRenderXhsActiveTab();
+}
+
+function vRenderXhsActiveTab() {
+  document.getElementById('xhs-panel-posts').style.display    = vxhsActiveTab === 'posts'    ? 'block' : 'none';
+  document.getElementById('xhs-panel-creators').style.display = vxhsActiveTab === 'creators' ? 'block' : 'none';
+  if (vxhsActiveTab === 'posts')    vRenderXhsPosts();
+  if (vxhsActiveTab === 'creators') vRenderXhsCreators();
+}
+
+function vRenderXhsPosts() {
+  const el = document.getElementById('xhs-panel-posts');
+  if (!vxhsFiltered.length) {
+    el.innerHTML = '<div class="empty"><div class="icon">📕</div><p>No posts match your filters.</p></div>';
+    return;
+  }
+  const sortBy = document.getElementById('xhs-sort-select').value;
+  const sorted = [...vxhsFiltered].sort((a, b) => {
+    if (sortBy === 'likes') return (parseInt(b.stats?.likes)||0) - (parseInt(a.stats?.likes)||0);
+    return new Date(b.created_at||0) - new Date(a.created_at||0);
+  });
+  el.innerHTML = '<div class="v-cards">' + sorted.slice(0, 60).map(p => {
+    const likes   = vFmt(parseInt(p.stats?.likes)||0);
+    const cover   = p.cover || '';
+    const creator = p.creator?.username || p.creator?.nickName || '—';
+    const avatar  = p.creator?.avatar || '';
+    const typeIcon = p.type === 'video' ? '🎬' : '📷';
+    const date    = p.created_at ? new Date(p.created_at).toLocaleDateString('ko-KR') : '';
+    return `<div class="v-card">
+      ${cover ? `<a href="${vEsc(p.url||'#')}" target="_blank" class="card-thumb">
+        <img src="${vEsc(cover)}" loading="lazy" onerror="this.parentElement.style.display='none'">
+        <div class="thumb-overlay"></div>
+        <div class="thumb-views" style="background:rgba(255,36,66,.7)">${typeIcon} ${likes} ❤️</div>
+      </a>` : ''}
+      <div class="v-card-body">
+        <div class="v-caption" title="${vEsc(p.title||'')}">
+          <a href="${vEsc(p.url||'#')}" target="_blank" style="color:inherit;text-decoration:none">${vEsc((p.title||'').slice(0,80))}</a>
+        </div>
+        <div class="v-meta">
+          ${avatar ? `<img src="${vEsc(avatar)}" style="width:18px;height:18px;border-radius:50%;object-fit:cover">` : ''}
+          <span style="font-weight:600;font-size:0.8rem">${vEsc(creator)}</span>
+          <span style="margin-left:auto;color:#ff2442;font-weight:700;font-size:0.82rem">❤️ ${likes}</span>
+        </div>
+        ${date ? `<div style="font-size:0.72rem;color:#aaa;margin-top:4px">${date}</div>` : ''}
+      </div>
+    </div>`;
+  }).join('') + '</div>';
+}
+
+function vRenderXhsCreators() {
+  const el = document.getElementById('xhs-panel-creators');
+  const stats = {};
+  vxhsFiltered.forEach(p => {
+    const uid = p.creator?.userId || p.creator?.username || '?';
+    if (!stats[uid]) stats[uid] = { name: p.creator?.username || p.creator?.nickName || uid, avatar: p.creator?.avatar||'', posts:0, likes:0 };
+    stats[uid].posts++;
+    stats[uid].likes += parseInt(p.stats?.likes)||0;
+  });
+  const sorted = Object.values(stats).sort((a,b) => b.likes - a.likes).slice(0,30);
+  if (!sorted.length) { el.innerHTML = '<div class="empty"><div class="icon">👤</div><p>No creator data.</p></div>'; return; }
+  el.innerHTML = `<div class="creators-table-wrap"><table>
+    <thead><tr><th>#</th><th>Creator</th><th>Posts</th><th>Total Likes</th></tr></thead>
+    <tbody>${sorted.map((c,i) => `<tr>
+      <td style="color:#ff2442;font-weight:700">${i+1}</td>
+      <td><div style="display:flex;align-items:center;gap:8px">
+        ${c.avatar?`<img src="${vEsc(c.avatar)}" style="width:28px;height:28px;border-radius:50%;object-fit:cover">`:'<div style="width:28px;height:28px;border-radius:50%;background:#ffd0d5;display:flex;align-items:center;justify-content:center;font-size:0.8rem">👤</div>'}
+        <span style="font-weight:600">${vEsc(c.name)}</span>
+      </div></td>
+      <td>${c.posts}</td>
+      <td style="color:#ff2442;font-weight:700">❤️ ${vFmt(c.likes)}</td>
+    </tr>`).join('')}</tbody>
+  </table></div>`;
 }
 </script>
 </body>
