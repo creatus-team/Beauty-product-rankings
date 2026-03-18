@@ -48,11 +48,6 @@ YESSTYLE_CATEGORIES = {
     "Makeup":      "https://www.yesstyle.com/en/beauty-makeup/list.html/bcc.15479_bpt.46?sb=136",
 }
 
-# AliExpress actor (piotrv1001~aliexpress-listings-scraper)
-ALIEXPRESS_ACTOR = "piotrv1001~aliexpress-listings-scraper"
-ALIEXPRESS_SEARCH_URL = "https://www.aliexpress.com/wholesale?SearchText=beauty+skincare+makeup&SortType=total_tranRank_asc"
-_aliexpress_run_id = "qLIPASr5oFbA6fSrl"  # latest completed run (updated on refresh)
-
 # OliveYoung Global bestseller endpoints
 OY_ORDER_BEST_URL = "https://global.oliveyoung.com/display/product/best-seller/order-best"
 OY_KOREA_BEST_URL = "https://product-ranking-service.oliveyoung.com/v1/pages/ranking/sales/products"
@@ -129,71 +124,6 @@ def fetch_yesstyle():
         except Exception as e:
             print(f"[YesStyle] {subcat} failed: {e}")
     return all_items
-
-def fetch_aliexpress(trigger_new=False):
-    """AliExpress 뷰티 베스트셀러 (Apify piotrv1001~aliexpress-listings-scraper)"""
-    global _aliexpress_run_id
-    import time
-    if trigger_new:
-        payload = {
-            "searchUrls": [{"url": ALIEXPRESS_SEARCH_URL}],
-            "maxItems": 100,
-        }
-        try:
-            r = requests.post(
-                f"https://api.apify.com/v2/acts/{ALIEXPRESS_ACTOR}/runs?token={APIFY_TOKEN}",
-                json=payload, timeout=15
-            )
-            r.raise_for_status()
-            new_run_id = r.json().get("data", {}).get("id")
-            if new_run_id:
-                print(f"[AliExpress] new run started: {new_run_id}")
-                # Wait up to 3 minutes for completion
-                for _ in range(36):
-                    time.sleep(5)
-                    rs = requests.get(
-                        f"https://api.apify.com/v2/actor-runs/{new_run_id}?token={APIFY_TOKEN}",
-                        timeout=10
-                    ).json().get("data", {}).get("status")
-                    if rs in ("SUCCEEDED", "FAILED", "ABORTED"):
-                        break
-                if rs == "SUCCEEDED":
-                    _aliexpress_run_id = new_run_id
-                    print(f"[AliExpress] run succeeded: {new_run_id}")
-        except Exception as e:
-            print(f"[AliExpress] trigger failed: {e}")
-
-    # Read from latest run
-    try:
-        url = (f"https://api.apify.com/v2/actor-runs/{_aliexpress_run_id}/dataset/items"
-               f"?token={APIFY_TOKEN}&limit=200")
-        resp = requests.get(url, timeout=30)
-        resp.raise_for_status()
-        raw = resp.json()
-        items = []
-        for rank, p in enumerate(raw, 1):
-            items.append({
-                "name": p.get("title", ""),
-                "url": f"https://www.aliexpress.com/item/{p['id']}.html" if p.get("id") else "#",
-                "asin": p.get("id"),
-                "position": rank,
-                "thumbnailUrl": p.get("imageUrl"),
-                "stars": p.get("rating"),
-                "reviewsCount": None,
-                "categoryName": "Beauty Bestsellers",
-                "categoryFullName": "AliExpress Beauty Bestsellers",
-                "_country_code": "AX",
-                "_country_flag": "🛍️",
-                "_country_name": "AliExpress",
-                "_price_value": p.get("price"),
-                "_price_currency": "$",
-                "_total_sold": p.get("totalSold"),
-            })
-        print(f"[AliExpress] {len(items)} items from run {_aliexpress_run_id}")
-        return items
-    except Exception as e:
-        print(f"[AliExpress] fetch failed: {e}")
-        return []
 
 def fetch_oliveyoung():
     """올리브영 글로벌 베스트셀러 (Top orders + Top in Korea)"""
@@ -514,9 +444,6 @@ def fetch_from_apify(refresh=False):
     ys_items = fetch_yesstyle()
     print(f"[YesStyle] fetched {len(ys_items)} items")
     all_items.extend(ys_items)
-    # AliExpress 추가
-    ax_items = fetch_aliexpress(trigger_new=refresh)
-    all_items.extend(ax_items)
     # OliveYoung 추가
     oy_items = fetch_oliveyoung()
     print(f"[OliveYoung] fetched {len(oy_items)} items")
@@ -680,7 +607,7 @@ header{background:linear-gradient(135deg,#e8637a 0%,#c0445f 100%);color:#fff;
   font-size:.85rem;font-weight:600;color:var(--muted);
   border-bottom:3px solid transparent;white-space:nowrap;
   transition:all .2s;margin-bottom:-1px}
-.ctab:hover{color:var(--pink)}
+.ctab:hover{color:var(--pink);background:var(--pink-light);border-radius:8px 8px 0 0;transform:translateY(-2px)}
 .ctab.active{color:var(--pink);border-bottom-color:var(--pink)}
 .ctab .flag{font-size:1.1rem;margin-right:5px}
 .ctab .cnt{background:var(--pink-light);color:var(--pink);
@@ -780,7 +707,8 @@ select.fs:focus{border-color:var(--pink);background:#fff}
 .db-right{width:370px;flex-shrink:0;display:flex;flex-direction:column;gap:12px;overflow-y:auto;padding-right:2px}
 .db-section-hdr{font-size:.88rem;font-weight:800;color:var(--pink);margin-bottom:10px}
 .dash-compact{display:flex;gap:10px;flex:1;overflow-x:auto;overflow-y:auto;align-items:flex-start;padding-bottom:4px}
-.dash-mini-col{flex:1;min-width:160px;max-width:210px;background:var(--surface);border-radius:12px;border:1px solid var(--border);overflow:hidden;box-shadow:var(--shadow);display:flex;flex-direction:column;flex-shrink:0}
+.dash-mini-col{flex:1;min-width:160px;max-width:210px;background:var(--surface);border-radius:12px;border:1px solid var(--border);overflow:hidden;box-shadow:var(--shadow);display:flex;flex-direction:column;flex-shrink:0;cursor:pointer;transition:transform .18s,box-shadow .18s,border-color .18s}
+.dash-mini-col:hover{transform:translateY(-3px);box-shadow:0 8px 24px rgba(211,61,90,.18);border-color:var(--pink)}
 .dash-mini-hdr{padding:8px 11px;display:flex;align-items:center;gap:6px;background:linear-gradient(135deg,var(--pink-light) 0%,#fff 100%);border-bottom:2px solid var(--pink-mid);font-weight:800;font-size:.74rem;color:var(--pink);white-space:nowrap}
 .dash-mini-item{display:flex;flex-direction:column;text-decoration:none;color:inherit;border-bottom:1px solid var(--border);transition:background .15s;overflow:hidden}
 .dash-mini-item:hover{background:var(--pink-light)}
@@ -791,7 +719,8 @@ select.fs:focus{border-color:var(--pink);background:#fff}
 .dash-mini-ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:2rem;color:var(--pink-mid)}
 .dash-mini-rank{position:absolute;top:7px;left:7px;font-size:.68rem;font-weight:900;color:#fff;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.25);z-index:2}
 .dash-mini-name{padding:8px 10px 10px;font-size:.76rem;font-weight:700;line-height:1.4;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;color:var(--text)}
-.db-chart-card{background:var(--surface);border-radius:14px;border:1px solid var(--border);box-shadow:var(--shadow);padding:14px 16px;flex-shrink:0}
+.db-chart-card{background:var(--surface);border-radius:14px;border:1px solid var(--border);box-shadow:var(--shadow);padding:14px 16px;flex-shrink:0;cursor:pointer;transition:transform .18s,box-shadow .18s,border-color .18s}
+.db-chart-card:hover{transform:translateY(-3px);box-shadow:0 8px 24px rgba(211,61,90,.18);border-color:var(--pink)}
 .db-card-title{font-size:.82rem;font-weight:800;color:var(--pink);margin-bottom:10px}
 .db-pie-body{display:flex;gap:12px;align-items:flex-start}
 .db-pie-legend{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0;overflow-y:auto;max-height:190px}
@@ -1467,8 +1396,8 @@ select.fs:focus{border-color:var(--pink);background:#fff}
 let all = [], country = 'DB', ysSub = 'All Beauty', oySub = 'All', qjSub = 'All', ttSub = 'All', ttPeriod = '30d';
 
 // country order: ALL first, then US, UK, JP, then others
-const ORDER = ['DB','CH','IG','ALL','US','UK','JP','YS','AX','OY','QJ','TT','DE','FR','CA','AU','IT','ES'];
-const TAB_LABELS = {'DB':'📊 전체 대시보드','CH':'📈 카테고리 분석','IG':'🧪 성분 트렌드','ALL':'전체','YS':'YesStyle','AX':'AliExpress','OY':'🌿 OliveYoung','QJ':'🛒 Qoo10 Japan','TT':'🎵 TikTok Shop US'};
+const ORDER = ['DB','CH','IG','US','UK','JP','YS','OY','QJ','TT','DE','FR','CA','AU','IT','ES'];
+const TAB_LABELS = {'DB':'📊 전체 대시보드','CH':'📈 카테고리 분석','IG':'🧪 성분 트렌드','ALL':'전체','YS':'YesStyle','OY':'🌿 OliveYoung','QJ':'🛒 Qoo10 Japan','TT':'🎵 TikTok Shop US'};
 
 async function loadData() {
   show('랭킹 데이터 불러오는 중...');
@@ -1511,6 +1440,12 @@ function setUpdated(ts) {
       hour:'2-digit',minute:'2-digit',timeZone:'Asia/Seoul'}) + ' KST';
 }
 
+function goTab(code) {
+  country=code; ysSub='All Beauty'; oySub='All'; qjSub='All'; ttSub='All'; ttPeriod='30d';
+  resetYsPills(); resetOyPills(); resetQjPills(); resetTtPills(); resetTtPeriodPills();
+  buildTabs(); render();
+  window.scrollTo({top:0, behavior:'smooth'});
+}
 function buildTabs() {
   // collect countries preserving ORDER preference
   const counts = {ALL: all.length};
@@ -1519,8 +1454,8 @@ function buildTabs() {
     const c = i._country_code;
     if (c) { counts[c] = (counts[c]||0)+1; seen.add(c); }
   });
-  const codes = ['DB', 'CH', 'IG', 'ALL', ...ORDER.filter(c => c!=='ALL' && c!=='DB' && c!=='CH' && c!=='IG' && seen.has(c)),
-                 ...[...seen].filter(c => !ORDER.includes(c))];
+  const codes = ['DB', 'CH', 'IG', ...ORDER.filter(c => c!=='DB' && c!=='CH' && c!=='IG' && seen.has(c)),
+                 ...[...seen].filter(c => !ORDER.includes(c) && c!=='ALL')];
 
   const el = document.getElementById('tabs');
   el.innerHTML = '';
@@ -1532,7 +1467,7 @@ function buildTabs() {
     btn.className = 'ctab' + (code===country ? ' active' : '');
     const cntHtml = (code==='DB'||code==='CH'||code==='IG') ? '' : `<span class="cnt">${counts[code]||0}</span>`;
     btn.innerHTML = (flag ? `<span class="flag">${flag}</span>` : '') + label + cntHtml;
-    btn.onclick = () => { country=code; ysSub='All Beauty'; oySub='All'; qjSub='All'; ttSub='All'; ttPeriod='30d'; resetYsPills(); resetOyPills(); resetQjPills(); resetTtPills(); resetTtPeriodPills(); buildTabs(); render(); };
+    btn.onclick = () => goTab(code);
     el.appendChild(btn);
   });
 }
@@ -1666,7 +1601,6 @@ function renderDashboard() {
     {code:'UK', label:'Amazon UK'},
     {code:'JP', label:'Amazon JP'},
     {code:'YS', label:'YesStyle'},
-    {code:'AX', label:'AliExpress'},
     {code:'OY', label:'OliveYoung', sub:'Top orders'},
     {code:'QJ', label:'Qoo10 JP'},
     {code:'TT', label:'TikTok Shop', sortKey:'_sale_7d_num'},
@@ -1677,13 +1611,13 @@ function renderDashboard() {
     const top5 = all.filter(i=>i._country_code===code && (!sub || i._oy_subcategory===sub))
       .sort((a,b) => sortKey ? (b[sortKey]||0)-(a[sortKey]||0) : (a.position||999)-(b.position||999))
       .slice(0,5);
-    prodHtml += `<div class="dash-mini-col"><div class="dash-mini-hdr"><span>${flag}</span>${label}</div>`;
+    prodHtml += `<div class="dash-mini-col" onclick="goTab('${code}')" title="${label} 탭으로 이동"><div class="dash-mini-hdr"><span>${flag}</span>${label}</div>`;
     top5.forEach((item,idx) => {
       const r=idx+1, rc=r===1?'r1':r===2?'r2':r===3?'r3':'rn';
       const th=item.thumbnailUrl;
       const imgEl=th?`<img src="${th}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`:'' ;
       const phEl=`<div class="dash-mini-ph" style="${th?'display:none':''}">🧴</div>`;
-      prodHtml+=`<a class="dash-mini-item" href="${item.url||'#'}" target="_blank" rel="noopener">
+      prodHtml+=`<a class="dash-mini-item" href="${item.url||'#'}" target="_blank" rel="noopener" onclick="event.stopPropagation()">
         <div class="dash-mini-thumb">
           ${imgEl}${phEl}
           <div class="dash-mini-rank ${rc}">${r}</div>
@@ -1699,15 +1633,15 @@ function renderDashboard() {
       <div class="dash-compact">${prodHtml}</div>
     </div>
     <div class="db-right">
-      <div class="db-chart-card">
-        <div class="db-card-title">📈 카테고리 분포 (전체)</div>
+      <div class="db-chart-card" onclick="goTab('CH')" title="카테고리 분석으로 이동">
+        <div class="db-card-title">📈 카테고리 분포 (전체) <span style="font-size:.7rem;font-weight:400;color:#bbb;margin-left:4px">↗ 클릭</span></div>
         <div class="db-pie-body">
           <canvas id="dbPieChart" width="185" height="185" style="flex-shrink:0"></canvas>
           <div id="dbPieLegend" class="db-pie-legend"></div>
         </div>
       </div>
-      <div class="db-chart-card">
-        <div class="db-card-title">🧪 트렌딩 성분 TOP 10 (전체)</div>
+      <div class="db-chart-card" onclick="goTab('IG')" title="성분 트렌드로 이동">
+        <div class="db-card-title">🧪 트렌딩 성분 TOP 10 (전체) <span style="font-size:.7rem;font-weight:400;color:#bbb;margin-left:4px">↗ 클릭</span></div>
         <div class="db-ing-bars" id="dbIngBars"></div>
       </div>
     </div>
@@ -1828,7 +1762,7 @@ function getDetailCategory(item) {
     if (/クリーム|cream|moistur|emulsion|乳液/.test(name)) return {main:'스킨케어', sub:'로션/크림'};
     return {main:'스킨케어', sub:'기타 스킨케어'};
   }
-  if (code === 'AX' || code === 'OY') {
+  if (code === 'OY') {
     if (/shampoo|conditioner|hair/.test(name)) return {main:'헤어케어', sub:'헤어케어'};
     if (/sun.?screen|sun.?serum|\bspf\b/.test(name)) return {main:'스킨케어', sub:'선케어'};
     if (/serum|ampoule|essence/.test(name)) return {main:'스킨케어', sub:'세럼/에센스'};
@@ -1966,7 +1900,6 @@ function renderChart() {
     {code:'UK',label:'🇬🇧 Amazon UK'},
     {code:'JP',label:'🇯🇵 Amazon JP'},
     {code:'YS',label:'🍀 YesStyle'},
-    {code:'AX',label:'🛍️ AliExpress'},
     {code:'OY',label:'🌿 OliveYoung'},
     {code:'QJ',label:'🛒 Qoo10 JP'},
   ];
@@ -2081,7 +2014,6 @@ function renderIngredientChart() {
     {code:'UK',label:'🇬🇧 Amazon UK'},
     {code:'JP',label:'🇯🇵 Amazon JP'},
     {code:'YS',label:'🍀 YesStyle'},
-    {code:'AX',label:'🛍️ AliExpress'},
     {code:'OY',label:'🌿 OliveYoung'},
     {code:'QJ',label:'🛒 Qoo10 JP'},
   ];
@@ -2169,7 +2101,8 @@ function drawDbPieChart() {
     const mainSlices=slices.filter(s=>s.main===main);
     if(!mainSlices.length) return;
     const mainTotal=mainSlices.reduce((s,d)=>s+d.count,0);
-    html+=`<div class="db-legend-grp">${main} <span style="color:var(--pink);font-size:.67rem">${Math.round(mainTotal/total*100)}%</span></div>`;
+    const mainDisplay = main === '기타' ? '기타 <span style="color:#aaa;font-weight:400;font-size:.65rem">(향수, 바디, 구강)</span>' : main;
+    html+=`<div class="db-legend-grp">${mainDisplay} <span style="color:var(--pink);font-size:.67rem">${Math.round(mainTotal/total*100)}%</span></div>`;
     mainSlices.forEach(({sub,count,color})=>{
       html+=`<div class="db-legend-item">
         <span class="db-legend-dot" style="background:${color}"></span>
@@ -3076,6 +3009,7 @@ function vSwitchPlatform(p) {
   } else {
     hdr.className = 'vh-subheader xhs';
     document.getElementById('vh-hub-title').textContent = 'K-Beauty 小红书 Hub';
+    document.getElementById('vh-last-updated').textContent = 'Loading...';
     xhsHub.style.display = 'block';
     if (!vxhsInitialized) { vInitXhs(); vxhsInitialized = true; }
   }

@@ -1,226 +1,230 @@
 #!/usr/bin/env python3
 """
-XHS (小红书 / RedNote) K-Beauty Scraper
-Apify actor: easyapi/rednote-xiaohongshu-search-scraper (ID: 9qkezGwljt2uc4DY9)
+XHS (小红书 / RedNote) K-Beauty Scraper — Persistent Session 버전
+브라우저 프로필을 로컬에 저장 → 한 번 로그인 후 매일 자동 수집.
 
 사용법:
-  1. https://console.apify.com/actors/9qkezGwljt2uc4DY9 에서 액터 렌트 (무료)
-  2. python3 kbeauty_xhs_scraper.py
-  3. xhs_data_YYYY-MM-DD.json 파일 생성됨
-  4. git add xhs_data_*.json && git push
+  1. python3 kbeauty_xhs_scraper.py
+     → 처음 실행 시 브라우저가 열림 → XHS 로그인 → Enter 입력
+     → 이후 실행부터 저장된 세션 자동 재사용
+  2. xhs_data_YYYY-MM-DD.json 파일 생성됨
+  3. git add xhs_data_*.json && git push
 """
 
-import os, json, time, requests, re
+import os, json, re, time, urllib.parse, threading
 from datetime import datetime
+
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
     pass
 
-APIFY_TOKEN = os.getenv("APIFY_TOKEN", "")
-XHS_COOKIE  = os.getenv("XHS_COOKIE", "")
-XHS_ACTOR_ID = "9qkezGwljt2uc4DY9"  # easyapi/rednote-xiaohongshu-search-scraper
-BASE = "https://api.apify.com/v2"
+SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
+PROFILE_DIR = os.path.join(SCRIPT_DIR, ".xhs_browser_profile")
 
-# 키워드 → 카테고리 매핑 (뷰티 특화)
 KEYWORD_CATEGORIES = {
     # 스킨케어
-    "韩国护肤":     "스킨케어",
-    "韩国精华":     "스킨케어",
-    "韩国水乳":     "스킨케어",   # Korean toner+lotion
-    "韩国防晒":     "스킨케어",   # Korean sunscreen
-    "韩国面膜":     "스킨케어",   # Korean sheet mask
-    "cosrx":        "스킨케어",
+    "韩国护肤":         "스킨케어",
+    "韩国精华":         "스킨케어",
+    "韩国水乳":         "스킨케어",
+    "韩国防晒":         "스킨케어",
+    "韩国面膜":         "스킨케어",
+    "cosrx":            "스킨케어",
     "beauty of joseon": "스킨케어",
-    "anua":         "스킨케어",
-    "skin1004":     "스킨케어",
-    "laneige":      "스킨케어",
+    "anua":             "스킨케어",
+    "skin1004":         "스킨케어",
+    "laneige":          "스킨케어",
     # 메이크업
-    "韩国彩妆":     "메이크업",
-    "韩系妆容":     "메이크업",   # Korean-style makeup
-    "韩国口红":     "메이크업",   # Korean lipstick
-    "韩国粉底":     "메이크업",   # Korean foundation
-    "romand":       "메이크업",
-    "3ce":          "메이크업",
-    "peripera":     "메이크업",
+    "韩国彩妆":         "메이크업",
+    "韩系妆容":         "메이크업",
+    "韩国口红":         "메이크업",
+    "romand":           "메이크업",
+    "3ce":              "메이크업",
+    "peripera":         "메이크업",
     # 헤어케어
-    "韩国护发":     "헤어케어",   # Korean hair care
-    "韩国洗发水":   "헤어케어",   # Korean shampoo
-    # 종합/바이럴
-    "oliveyoung":   "종합",
-    "小韩护肤":     "종합",       # Korean-style skincare (slang)
-    "k-beauty":     "종합",
-    "韩国美妆":     "종합",       # Korean beauty
-    "韩国素颜霜":   "종합",       # Korean no-makeup cream
+    "韩国护发":         "헤어케어",
+    "韩国洗发水":       "헤어케어",
+    # 종합
+    "oliveyoung":       "종합",
+    "k-beauty":         "종합",
+    "韩国美妆":         "종합",
+    "韩国素颜霜":       "종합",
 }
 
-MAX_ITEMS_PER_KEYWORD = 30
+PAGE_SIZE = 20
 
 
 def parse_likes(val):
     if not val:
         return 0
-    s = str(val).replace(',', '').strip()
-    m = re.match(r'([\d.]+)([万千kKwW]?)', s)
+    s = str(val).replace(",", "").strip()
+    m = re.match(r"([\d.]+)([万千kKwW]?)", s)
     if not m:
         return 0
     n = float(m.group(1))
     u = m.group(2).lower()
-    if u in ('万', 'w'):
+    if u in ("万", "w"):
         n *= 10000
-    elif u in ('千', 'k'):
+    elif u in ("千", "k"):
         n *= 1000
     return int(n)
 
 
-def run_actor(keyword):
-    print(f"  [{keyword}] 실행 중...")
-    r = requests.post(
-        f"{BASE}/acts/{XHS_ACTOR_ID}/runs",
-        params={"token": APIFY_TOKEN},
-        json={"keyword": keyword, "maxItems": MAX_ITEMS_PER_KEYWORD, **({"cookie": XHS_COOKIE} if XHS_COOKIE else {})},
-        timeout=30
+def check_login(ctx):
+    """로그인 상태 확인 — edith API user/me로 확인."""
+    result = {}
+    page = ctx.new_page()
+    page.on("dialog", lambda d: d.dismiss())
+
+    def capture(resp):
+        if "user/me" in resp.url:
+            try:
+                result["data"] = resp.json()
+            except Exception:
+                pass
+
+    page.on("response", capture)
+    page.goto("https://www.xiaohongshu.com", wait_until="domcontentloaded", timeout=30000)
+    time.sleep(3)
+    page.close()
+
+    d = result.get("data") or {}
+    inner = d.get("data") or {} if d.get("success") else {}
+    nickname = inner.get("nickname", "") if isinstance(inner, dict) else ""
+    return bool(nickname), nickname
+
+
+def search_notes(ctx, keyword, category, seen_ids):
+    """검색 결과 페이지 열기 → XHS가 자체 호출하는 API 응답 인터셉트."""
+    page = ctx.new_page()
+    page.on("dialog", lambda d: d.dismiss())
+
+    captured = []
+    done = threading.Event()
+
+    def capture(resp):
+        url = resp.url
+        # edith 또는 www 도메인의 search/notes, homefeed 응답 캡처
+        if ("search/notes" in url or "homefeed" in url) and resp.status == 200:
+            try:
+                data = resp.json()
+                if data.get("success"):
+                    items = (data.get("data") or {}).get("items") or []
+                    if items:
+                        captured.extend(items)
+                        done.set()
+            except Exception:
+                pass
+
+    page.on("response", capture)
+
+    search_url = (
+        "https://www.xiaohongshu.com/search_result"
+        f"?keyword={urllib.parse.quote(keyword)}&type=note"
     )
-    r.raise_for_status()
-    data = r.json().get("data", {})
-    run_id = data.get("id")
-    if not run_id:
-        print(f"    오류: run ID 없음 → {r.text[:200]}")
-        return []
-    print(f"    Run ID: {run_id} — 완료 대기 중...")
-    status = "RUNNING"
-    status_r = None
-    for _ in range(60):
-        time.sleep(5)
-        status_r = requests.get(f"{BASE}/actor-runs/{run_id}", params={"token": APIFY_TOKEN}, timeout=15)
-        status = status_r.json()["data"]["status"]
-        if status in ("SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"):
-            break
-    print(f"    상태: {status}")
-    if status != "SUCCEEDED":
-        return []
-    dataset_id = status_r.json()["data"]["defaultDatasetId"]
-    items_r = requests.get(
-        f"{BASE}/datasets/{dataset_id}/items",
-        params={"token": APIFY_TOKEN, "limit": MAX_ITEMS_PER_KEYWORD},
-        timeout=30
-    )
-    return items_r.json()
+    try:
+        page.goto(search_url, wait_until="domcontentloaded", timeout=20000)
+    except Exception:
+        pass
 
+    # 최대 8초 대기
+    done.wait(timeout=8)
+    page.close()
 
-def normalize(raw_item, source_tag, category):
-    """Apify XHS 출력을 표준 포맷으로 변환.
-    두 가지 포맷 지원:
-      - 신형: {"item": {"id":..., "note_card":{...}}, "link":..., "scrapedAt":...}
-      - 구형: {"postData": {...}} 또는 flat
-    """
-    # 신형 포맷 (쿠키 인증 후 반환되는 구조)
-    item_obj  = raw_item.get("item") or {}
-    note_card = item_obj.get("note_card") or {}
-    if item_obj and note_card:
-        note_id  = item_obj.get("id", "")
-        post_url = raw_item.get("link", "")
-        if not post_url and note_id:
-            xsec = item_obj.get("xsec_token", "")
-            post_url = f"https://www.xiaohongshu.com/explore/{note_id}?xsec_token={xsec}"
+    items = []
+    for note in captured:
+        ni  = note.get("note_card") or {}
+        nid = note.get("id", "")
+        if not nid or nid in seen_ids:
+            continue
+        seen_ids.add(nid)
 
-        user_obj   = note_card.get("user") or {}
-        interact   = note_card.get("interact_info") or {}
-        cover_obj  = note_card.get("cover") or {}
-        cover_url  = cover_obj.get("url_default") or cover_obj.get("url_pre", "")
-        likes_raw  = interact.get("liked_count", 0)
-        title      = note_card.get("display_title", "")
-        # note_card.type: "normal"(image) | "video"
-        raw_type   = note_card.get("type", "normal")
-        post_type  = "video" if raw_type == "video" else "image"
-        scraped_at = raw_item.get("scrapedAt") or datetime.utcnow().isoformat() + "Z"
-        comments   = int(interact.get("comment_count", 0) or 0)
-        return {
-            "id":         note_id,
-            "url":        post_url,
-            "title":      title,
-            "type":       post_type,
-            "cover":      cover_url,
-            "created_at": scraped_at,
-            "source_tag": source_tag,
+        xsec  = note.get("xsec_token", "")
+        url   = f"https://www.xiaohongshu.com/explore/{nid}?xsec_token={xsec}&xsec_source=pc_search"
+        cover_o = ni.get("cover") or {}
+        cover   = cover_o.get("url_default") or cover_o.get("url_pre") or ""
+        user    = ni.get("user") or {}
+        inter   = ni.get("interact_info") or {}
+        likes   = parse_likes(inter.get("liked_count") or 0)
+        cmts    = int(inter.get("comment_count") or 0)
+        rtype   = ni.get("type", "normal")
+        items.append({
+            "id":         nid,
+            "url":        url,
+            "title":      ni.get("display_title") or ni.get("title") or "",
+            "type":       "video" if rtype == "video" else "image",
+            "cover":      cover,
+            "created_at": datetime.utcnow().isoformat() + "Z",
+            "source_tag": keyword,
             "category":   category,
             "creator": {
-                "userId":   user_obj.get("user_id", ""),
-                "username": user_obj.get("nickname") or user_obj.get("nick_name", ""),
-                "avatar":   user_obj.get("avatar", ""),
+                "userId":   user.get("user_id", ""),
+                "username": user.get("nickname") or user.get("nick_name") or "",
+                "avatar":   user.get("avatar", ""),
             },
-            "stats": {
-                "likes":    parse_likes(likes_raw),
-                "comments": comments,
-            },
-        }
-
-    # 구형/기타 포맷 fallback
-    pd = raw_item.get("postData") or raw_item
-    note_id  = pd.get("noteId") or pd.get("id") or raw_item.get("noteId", "")
-    post_url = pd.get("postUrl") or pd.get("url") or raw_item.get("postUrl", "")
-    if not post_url and note_id:
-        xsec = pd.get("xsecToken", "")
-        post_url = f"https://www.xiaohongshu.com/explore/{note_id}?xsec_token={xsec}"
-    user       = pd.get("user") or raw_item.get("user") or {}
-    interact   = pd.get("interactInfo") or raw_item.get("interactInfo") or {}
-    cover_obj  = pd.get("cover") or raw_item.get("cover") or {}
-    cover_url  = ""
-    if isinstance(cover_obj, dict):
-        cover_url = (
-            cover_obj.get("urlDefault") or cover_obj.get("urlPre") or
-            ((cover_obj.get("infoList") or [{}])[0].get("url", ""))
-        )
-    likes_raw  = interact.get("likedCount") or raw_item.get("likes") or raw_item.get("likedCount") or 0
-    title      = pd.get("displayTitle") or raw_item.get("displayTitle") or raw_item.get("title") or ""
-    post_type  = pd.get("type") or raw_item.get("type") or "image"
-    scraped_at = raw_item.get("scrapedAt") or datetime.utcnow().isoformat() + "Z"
-    return {
-        "id":         note_id,
-        "url":        post_url,
-        "title":      title,
-        "type":       post_type,
-        "cover":      cover_url,
-        "created_at": scraped_at,
-        "source_tag": source_tag,
-        "category":   category,
-        "creator": {
-            "userId":   user.get("userId", ""),
-            "username": user.get("nickName") or user.get("nickname", ""),
-            "avatar":   user.get("avatar", ""),
-        },
-        "stats": {
-            "likes":    parse_likes(likes_raw),
-            "comments": int(raw_item.get("comments", 0) or 0),
-        },
-    }
+            "stats": {"likes": likes, "comments": cmts},
+        })
+    return items
 
 
 def main():
-    if not APIFY_TOKEN:
-        print("❌ APIFY_TOKEN 없음. .env 파일에 APIFY_TOKEN=... 추가 후 재실행하세요.")
-        return
+    from playwright.sync_api import sync_playwright
 
     date_str = datetime.now().strftime("%Y-%m-%d")
-    out_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"xhs_data_{date_str}.json")
+    out_path = os.path.join(SCRIPT_DIR, f"xhs_data_{date_str}.json")
 
     all_items = []
     seen_ids  = set()
 
-    for kw, cat in KEYWORD_CATEGORIES.items():
-        try:
-            raw   = run_actor(kw)
-            count = 0
-            for item in raw:
-                norm = normalize(item, kw, cat)
-                if norm["id"] and norm["id"] not in seen_ids:
-                    seen_ids.add(norm["id"])
-                    all_items.append(norm)
-                    count += 1
-            print(f"    → {count}개 추가 (누적: {len(all_items)})\n")
-        except Exception as e:
-            print(f"    오류 '{kw}': {e}\n")
+    os.makedirs(PROFILE_DIR, exist_ok=True)
+
+    with sync_playwright() as pw:
+        ctx = pw.chromium.launch_persistent_context(
+            PROFILE_DIR,
+            headless=False,
+            user_agent=(
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/131.0.0.0 Safari/537.36"
+            ),
+            viewport={"width": 1440, "height": 900},
+            locale="zh-CN",
+        )
+
+        # 로그인 확인
+        print("로그인 상태 확인 중...")
+        logged_in, nickname = check_login(ctx)
+
+        if not logged_in:
+            print("\n⚠️  XHS 로그인이 필요합니다.")
+            print("   열린 브라우저에서 xiaohongshu.com에 로그인하세요.")
+            print("   로그인 완료 후 여기서 Enter를 누르세요...")
+            # 브라우저에 XHS 열기
+            p = ctx.new_page()
+            p.goto("https://www.xiaohongshu.com", wait_until="domcontentloaded", timeout=30000)
+            input()
+            p.close()
+            # 다시 확인
+            logged_in, nickname = check_login(ctx)
+            if not logged_in:
+                print("❌ 로그인 확인 실패. 다시 실행해주세요.")
+                ctx.close()
+                return
+
+        print(f"✅ 로그인 확인: {nickname}")
+
+        for keyword, category in KEYWORD_CATEGORIES.items():
+            print(f"  [{keyword}] 검색 중...")
+            try:
+                items = search_notes(ctx, keyword, category, seen_ids)
+                all_items.extend(items)
+                print(f"    → {len(items)}개 추가 (누적: {len(all_items)})")
+            except Exception as e:
+                print(f"    오류: {e}")
+            time.sleep(1.5)
+
+        ctx.close()
 
     # 좋아요순 정렬
     all_items.sort(key=lambda x: x["stats"]["likes"], reverse=True)
@@ -228,8 +232,8 @@ def main():
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(all_items, f, ensure_ascii=False, indent=2)
 
-    print(f"✅ {len(all_items)}개 XHS 포스트 저장 → {out_path}")
-    print("다음: git add xhs_data_*.json && git commit -m 'Add XHS data' && git push")
+    print(f"\n✅ {len(all_items)}개 XHS 포스트 저장 → {out_path}")
+    print("다음: git add xhs_data_*.json && git push")
 
 
 if __name__ == "__main__":
