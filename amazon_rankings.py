@@ -1823,8 +1823,13 @@ function drawChartForPlatform(code) {
 
   const canvas=document.getElementById('pieChart');
   if(!canvas) return;
+  const dpr=window.devicePixelRatio||1;
+  const W=canvas.offsetWidth||340,H=canvas.offsetHeight||340;
+  canvas.width=W*dpr;canvas.height=H*dpr;
+  canvas.style.width=W+'px';canvas.style.height=H+'px';
   const ctx=canvas.getContext('2d');
-  const W=canvas.width,H=canvas.height,cx=W/2,cy=H/2;
+  ctx.scale(dpr,dpr);
+  const cx=W/2,cy=H/2;
   const r=Math.min(cx,cy)-20,ri=r*0.44;
   let prog=0;
   const animate=()=>{
@@ -2052,8 +2057,13 @@ function drawDbPieChart() {
   if (!total) return;
   const canvas=document.getElementById('dbPieChart');
   if(!canvas) return;
+  const dpr=window.devicePixelRatio||1;
+  const W=canvas.offsetWidth||185,H=canvas.offsetHeight||185;
+  canvas.width=W*dpr;canvas.height=H*dpr;
+  canvas.style.width=W+'px';canvas.style.height=H+'px';
   const ctx=canvas.getContext('2d');
-  const W=canvas.width,H=canvas.height,cx=W/2,cy=H/2;
+  ctx.scale(dpr,dpr);
+  const cx=W/2,cy=H/2;
   const r=Math.min(cx,cy)-8,ri=r*0.44;
   let prog=0;
   const animate=()=>{
