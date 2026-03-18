@@ -1396,7 +1396,7 @@ select.fs:focus{border-color:var(--pink);background:#fff}
 let all = [], country = 'DB', ysSub = 'All Beauty', oySub = 'All', qjSub = 'All', ttSub = 'All', ttPeriod = '30d';
 
 // country order: ALL first, then US, UK, JP, then others
-const ORDER = ['DB','CH','IG','US','UK','JP','YS','OY','QJ','TT','DE','FR','CA','AU','IT','ES'];
+const ORDER = ['DB','CH','IG','US','OY','TT','YS','JP','UK','QJ','DE','FR','CA','AU','IT','ES'];
 const TAB_LABELS = {'DB':'📊 전체 대시보드','CH':'📈 카테고리 분석','IG':'🧪 성분 트렌드','ALL':'전체','YS':'YesStyle','OY':'🌿 OliveYoung','QJ':'🛒 Qoo10 Japan','TT':'🎵 TikTok Shop US'};
 
 async function loadData() {
@@ -1598,12 +1598,12 @@ function getFiltered() {
 function renderDashboard() {
   const platforms = [
     {code:'US', label:'Amazon US'},
-    {code:'UK', label:'Amazon UK'},
-    {code:'JP', label:'Amazon JP'},
-    {code:'YS', label:'YesStyle'},
     {code:'OY', label:'OliveYoung', sub:'Top orders'},
-    {code:'QJ', label:'Qoo10 JP'},
     {code:'TT', label:'TikTok Shop', sortKey:'_sale_7d_num'},
+    {code:'YS', label:'YesStyle'},
+    {code:'JP', label:'Amazon JP'},
+    {code:'UK', label:'Amazon UK'},
+    {code:'QJ', label:'Qoo10 JP'},
   ];
   let prodHtml = '';
   platforms.forEach(({code, label, sub, sortKey}) => {
