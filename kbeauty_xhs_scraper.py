@@ -19,6 +19,7 @@ except ImportError:
     pass
 
 APIFY_TOKEN = os.getenv("APIFY_TOKEN", "")
+XHS_COOKIE  = os.getenv("XHS_COOKIE", "")
 XHS_ACTOR_ID = "9qkezGwljt2uc4DY9"  # easyapi/rednote-xiaohongshu-search-scraper
 BASE = "https://api.apify.com/v2"
 
@@ -78,7 +79,7 @@ def run_actor(keyword):
     r = requests.post(
         f"{BASE}/acts/{XHS_ACTOR_ID}/runs",
         params={"token": APIFY_TOKEN},
-        json={"keyword": keyword, "maxItems": MAX_ITEMS_PER_KEYWORD},
+        json={"keyword": keyword, "maxItems": MAX_ITEMS_PER_KEYWORD, **({"cookie": XHS_COOKIE} if XHS_COOKIE else {})},
         timeout=30
     )
     r.raise_for_status()
@@ -109,39 +110,81 @@ def run_actor(keyword):
 
 
 def normalize(raw_item, source_tag, category):
-    """Apify XHS 출력을 표준 포맷으로 변환."""
+    """Apify XHS 출력을 표준 포맷으로 변환.
+    두 가지 포맷 지원:
+      - 신형: {"item": {"id":..., "note_card":{...}}, "link":..., "scrapedAt":...}
+      - 구형: {"postData": {...}} 또는 flat
+    """
+    # 신형 포맷 (쿠키 인증 후 반환되는 구조)
+    item_obj  = raw_item.get("item") or {}
+    note_card = item_obj.get("note_card") or {}
+    if item_obj and note_card:
+        note_id  = item_obj.get("id", "")
+        post_url = raw_item.get("link", "")
+        if not post_url and note_id:
+            xsec = item_obj.get("xsec_token", "")
+            post_url = f"https://www.xiaohongshu.com/explore/{note_id}?xsec_token={xsec}"
+
+        user_obj   = note_card.get("user") or {}
+        interact   = note_card.get("interact_info") or {}
+        cover_obj  = note_card.get("cover") or {}
+        cover_url  = cover_obj.get("url_default") or cover_obj.get("url_pre", "")
+        likes_raw  = interact.get("liked_count", 0)
+        title      = note_card.get("display_title", "")
+        # note_card.type: "normal"(image) | "video"
+        raw_type   = note_card.get("type", "normal")
+        post_type  = "video" if raw_type == "video" else "image"
+        scraped_at = raw_item.get("scrapedAt") or datetime.utcnow().isoformat() + "Z"
+        comments   = int(interact.get("comment_count", 0) or 0)
+        return {
+            "id":         note_id,
+            "url":        post_url,
+            "title":      title,
+            "type":       post_type,
+            "cover":      cover_url,
+            "created_at": scraped_at,
+            "source_tag": source_tag,
+            "category":   category,
+            "creator": {
+                "userId":   user_obj.get("user_id", ""),
+                "username": user_obj.get("nickname") or user_obj.get("nick_name", ""),
+                "avatar":   user_obj.get("avatar", ""),
+            },
+            "stats": {
+                "likes":    parse_likes(likes_raw),
+                "comments": comments,
+            },
+        }
+
+    # 구형/기타 포맷 fallback
     pd = raw_item.get("postData") or raw_item
     note_id  = pd.get("noteId") or pd.get("id") or raw_item.get("noteId", "")
     post_url = pd.get("postUrl") or pd.get("url") or raw_item.get("postUrl", "")
     if not post_url and note_id:
         xsec = pd.get("xsecToken", "")
         post_url = f"https://www.xiaohongshu.com/explore/{note_id}?xsec_token={xsec}"
-
     user       = pd.get("user") or raw_item.get("user") or {}
     interact   = pd.get("interactInfo") or raw_item.get("interactInfo") or {}
     cover_obj  = pd.get("cover") or raw_item.get("cover") or {}
     cover_url  = ""
     if isinstance(cover_obj, dict):
         cover_url = (
-            cover_obj.get("urlDefault") or
-            cover_obj.get("urlPre") or
+            cover_obj.get("urlDefault") or cover_obj.get("urlPre") or
             ((cover_obj.get("infoList") or [{}])[0].get("url", ""))
         )
-
     likes_raw  = interact.get("likedCount") or raw_item.get("likes") or raw_item.get("likedCount") or 0
     title      = pd.get("displayTitle") or raw_item.get("displayTitle") or raw_item.get("title") or ""
     post_type  = pd.get("type") or raw_item.get("type") or "image"
     scraped_at = raw_item.get("scrapedAt") or datetime.utcnow().isoformat() + "Z"
-
     return {
         "id":         note_id,
         "url":        post_url,
         "title":      title,
-        "type":       post_type,   # "video" | "image"
+        "type":       post_type,
         "cover":      cover_url,
         "created_at": scraped_at,
         "source_tag": source_tag,
-        "category":   category,   # 스킨케어 / 메이크업 / 헤어케어 / 종합
+        "category":   category,
         "creator": {
             "userId":   user.get("userId", ""),
             "username": user.get("nickName") or user.get("nickname", ""),
