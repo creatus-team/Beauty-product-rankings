@@ -5,8 +5,8 @@ Amazon Beauty Rankings Dashboard
 - Run: python3 amazon_rankings.py
 """
 
-from flask import Flask, jsonify, render_template_string
-import json, os, requests
+from flask import Flask, jsonify, render_template_string, request
+import json, os, requests, glob, subprocess, sys
 from datetime import datetime
 
 app = Flask(__name__)
@@ -347,6 +347,136 @@ def fetch_qoo10():
         print(f"[Qoo10] failed: {e}")
         return []
 
+TT_ACTOR_ID = "ukNOBkY1TUxHNE8os"  # TikTok Shop Search Scraper
+TT_DATASET_IDS = [
+    "cfFWOfqsb8LqWnspO",  # korean skincare
+    "06hfuMW8ncCuVM76a",  # korean skincare 2
+    "ThpQiEAhPPF2Q4Xwn",  # k-beauty makeup
+    "latRsoanhCFXKXN14",  # korean hair care
+    "f6GFTWpOEAfEzxYYH",  # skincare serum
+    "MfffGkB29amqMRhKq",  # tiktok viral beauty
+    "RmCxekOiD3AkHlM6Z",  # face cream moisturizer
+    "bd9cKAYhFUUbw4Z2h",  # sunscreen spf
+    "rKK7EI7r6TuhrJJoH",  # lip gloss tint
+    "wbWSoKdj3forJEFVp",  # vitamin c serum
+    "V3Ro6n29Xk5fc70p0",  # retinol cream
+    "om2T2UcdKbbLVe5av",  # hyaluronic acid
+    "iL5YBhJy9EfxNYvhN",  # niacinamide toner
+    "nE66cVmQxyATFekEc",  # eye cream anti-aging
+    "J7sXPCc8DKm6QUKcy",  # foundation makeup
+    "g2c7mn0ACMNNqcGkp",  # mascara lashes
+    "nKWuFqiWUx48cglhb",  # blush bronzer
+    "Q0kA3rNDWU6U3ELH6",  # setting spray
+    "pgfeTfmevYSXyaZeA",  # concealer
+    "Xuq7izyAYmx6iHD3b",  # hair serum
+    "BYSVSKbmRXNUcUB9X",  # shampoo scalp care
+    "tK5jcNSfd0XpPj1rU",  # hair mask treatment
+    "5yVV94hKqIkGh7MXa",  # body lotion
+    "eEY85fGhX20lgM6Db",  # exfoliating scrub
+    "lRnWkQAYZYas8c9hB",  # face wash cleanser
+    "VanQT0wEipYSl6sui",  # sheet mask
+    "YTwj6HQ4IjLj0diDq",  # essence ampoule
+    "dK7T2775xKyCWzB81",  # snail mucin
+    "rbRbT9fZKIJmU9ckC",  # centella asiatica
+]
+
+def _classify_tiktok(categories):
+    """TikTok Shop 카테고리 경로로 서브카테고리 분류"""
+    cats = (categories or '').lower()
+    if any(k in cats for k in ['hair', 'scalp', 'shampoo', 'conditioner', 'curler', 'straightener']):
+        return 'Hair Care'
+    if any(k in cats for k in ['makeup', 'lipstick', 'lip gloss', 'lip tint', 'lip treatment', 'foundation',
+                                'blush', 'concealer', 'mascara', 'eyeliner', 'eyeshadow', 'contour',
+                                'makeup brush', 'setting spray', 'bb cream', 'cc cream']):
+        return 'Makeup'
+    if any(k in cats for k in ['body care', 'bath', 'shower', 'body lotion', 'body scrub',
+                                'deodorant', 'body wash', 'body glaze', 'body cream']):
+        return 'Body Care'
+    return 'Skincare'
+
+def _parse_sale_cnt(s):
+    import re as _re
+    s = str(s or '').strip().replace(',', '')
+    m = _re.match(r'([\d.]+)([KMkm]?)', s)
+    if not m: return 0
+    n = float(m.group(1))
+    u = m.group(2).upper()
+    if u == 'K': n *= 1000
+    elif u == 'M': n *= 1000000
+    return int(n)
+
+def fetch_tiktok():
+    """TikTok Shop US 뷰티 베스트셀러 – Apify 데이터셋에서 로드, 판매량 순 정렬"""
+    seen_ids = set()
+    items = []
+    for dataset_id in TT_DATASET_IDS:
+        try:
+            url = (f"https://api.apify.com/v2/datasets/{dataset_id}/items"
+                   f"?token={APIFY_TOKEN}&limit=100")
+            resp = requests.get(url, timeout=20)
+            resp.raise_for_status()
+            raw = resp.json()
+            for p in raw:
+                cats = p.get('categories', '')
+                # Beauty & Personal Care 로 시작하는 것만, 가전제품 제외
+                if not cats.startswith('Beauty & Personal Care'):
+                    continue
+                if 'Appliance' in cats:
+                    continue
+                pid = str(p.get('product_id') or p.get('group_id') or '')
+                if not pid or pid in seen_ids:
+                    continue
+                seen_ids.add(pid)
+                name = p.get('product_name') or p.get('highlight') or ''
+                subcat = _classify_tiktok(cats)
+                price_str = p.get('avg_price_fz') or p.get('avg_price') or ''
+                try:
+                    price_val = float(str(price_str).replace('$', '').replace(',', ''))
+                except Exception:
+                    price_val = None
+                review_raw = p.get('review_count') or 0
+                try:
+                    review_val = int(str(review_raw).replace(',', '').replace('K', '000').replace('k', '000'))
+                except Exception:
+                    review_val = 0
+                sale_raw   = str(p.get('total_sale_cnt') or '')
+                sale_30d   = str(p.get('total_sale_30d_cnt') or '')
+                sale_7d    = str(p.get('total_sale_7d_cnt') or '')
+                cover = p.get('cover_url', '')
+                product_url = f"https://shop.tiktok.com/view/product/{pid}" if pid else ''
+                items.append({
+                    "name": name,
+                    "url": product_url,
+                    "asin": pid,
+                    "position": 0,
+                    "thumbnailUrl": cover,
+                    "stars": float(p.get('product_rating') or 0) or None,
+                    "reviewsCount": review_val,
+                    "categoryName": subcat,
+                    "categoryFullName": cats,
+                    "_country_code": "TT",
+                    "_country_flag": "🇺🇸",
+                    "_country_name": "TikTok Shop US",
+                    "_tt_subcategory": subcat,
+                    "_price_value": price_val,
+                    "_price_currency": "$",
+                    "_sale_cnt":     sale_raw,
+                    "_sale_cnt_num": _parse_sale_cnt(sale_raw),
+                    "_sale_30d_cnt": sale_30d,
+                    "_sale_30d_num": _parse_sale_cnt(sale_30d),
+                    "_sale_7d_cnt":  sale_7d,
+                    "_sale_7d_num":  _parse_sale_cnt(sale_7d),
+                    "_commission": p.get('commission', ''),
+                })
+        except Exception as e:
+            print(f"[TikTok] dataset {dataset_id} failed: {e}")
+    # 판매량 내림차순 정렬 후 position 할당
+    items.sort(key=lambda x: x['_sale_cnt_num'], reverse=True)
+    for idx, item in enumerate(items):
+        item['position'] = idx + 1
+    print(f"[TikTok] fetched {len(items)} unique beauty items")
+    return items
+
 def detect_country(item):
     for field in ("input", "categoryUrl", "url"):
         val = item.get(field) or ""
@@ -390,6 +520,9 @@ def fetch_from_apify(refresh=False):
     qj_items = fetch_qoo10()
     print(f"[Qoo10] fetched {len(qj_items)} items")
     all_items.extend(qj_items)
+    # TikTok Shop 추가
+    tt_items = fetch_tiktok()
+    all_items.extend(tt_items)
     return all_items
 
 def load_cache():
@@ -428,6 +561,46 @@ def api_data():
         cache = save_cache(items)
     return jsonify(cache)
 
+@app.route("/api/dates")
+def api_dates():
+    files = sorted(glob.glob(os.path.join(_SCRIPT_DIR, "data_*.json")), reverse=True)
+    return jsonify([os.path.basename(f).replace("data_","").replace(".json","") for f in files])
+
+@app.route("/api/data/<date>")
+def api_data_date(date):
+    path = os.path.join(_SCRIPT_DIR, f"data_{date}.json")
+    if not os.path.exists(path):
+        return jsonify([])
+    with open(path, encoding="utf-8") as f:
+        return jsonify(json.load(f))
+
+@app.route("/api/run", methods=["POST"])
+def api_run():
+    script = os.path.join(_SCRIPT_DIR, "kbeauty_daily.py")
+    log    = open(os.path.join(_SCRIPT_DIR, "last_run.log"), "w")
+    subprocess.Popen([sys.executable, script], stdout=log, stderr=subprocess.STDOUT)
+    return jsonify({"ok": True})
+
+@app.route("/api/x/dates")
+def api_x_dates():
+    files = sorted(glob.glob(os.path.join(_SCRIPT_DIR, "twitter_*.json")), reverse=True)
+    return jsonify([os.path.basename(f).replace("twitter_","").replace(".json","") for f in files])
+
+@app.route("/api/x/data/<date>")
+def api_x_data_date(date):
+    path = os.path.join(_SCRIPT_DIR, f"twitter_{date}.json")
+    if not os.path.exists(path):
+        return jsonify([])
+    with open(path, encoding="utf-8") as f:
+        return jsonify(json.load(f))
+
+@app.route("/api/run/twitter", methods=["POST"])
+def api_run_twitter():
+    script = os.path.join(_SCRIPT_DIR, "twitter_scraper.py")
+    log    = open(os.path.join(_SCRIPT_DIR, "last_twitter_run.log"), "w")
+    subprocess.Popen([sys.executable, script], stdout=log, stderr=subprocess.STDOUT)
+    return jsonify({"ok": True})
+
 @app.route("/")
 def index():
     return render_template_string(HTML)
@@ -460,6 +633,11 @@ header{background:linear-gradient(135deg,#e8637a 0%,#c0445f 100%);color:#fff;
 .h-title{font-size:1.1rem;font-weight:800}
 .h-sub{font-size:.72rem;opacity:.82;margin-top:1px}
 .h-right{display:flex;align-items:center;gap:10px}
+.mode-switch{display:flex;background:rgba(255,255,255,.2);border-radius:10px;padding:3px;gap:3px}
+.mode-btn{padding:7px 14px;border:none;border-radius:8px;cursor:pointer;font-weight:700;
+  font-size:.82rem;transition:all .2s;background:transparent;color:rgba(255,255,255,.75)}
+.mode-btn:hover{background:rgba(255,255,255,.15);color:#fff}
+.mode-btn.active{background:#fff;color:var(--pink)}
 .upd{font-size:.72rem;opacity:.75}
 #refreshBtn{background:#fff;color:var(--pink);border:none;padding:8px 16px;
   border-radius:8px;font-weight:700;font-size:.82rem;cursor:pointer;
@@ -660,6 +838,254 @@ select.fs:focus{border-color:var(--pink);background:#fff}
 .loader{width:44px;height:44px;border:4px solid var(--pink-light);
   border-top-color:var(--pink);border-radius:50%;animation:spin .8s linear infinite}
 #loading p{font-size:.88rem;color:var(--pink);font-weight:600}
+
+/* ── Video Hub Styles ─────────────────────────────────────────────────── */
+#video-hub .vh-subheader{color:white;padding:10px 28px;display:flex;
+  justify-content:space-between;align-items:center;
+  box-shadow:0 2px 8px rgba(0,0,0,0.1);transition:background 0.3s}
+#video-hub .vh-subheader.tiktok{background:linear-gradient(135deg,#e8a598 0%,#c97d8a 100%)}
+#video-hub .vh-subheader.twitter{background:linear-gradient(135deg,#1d9bf0 0%,#0d6ebc 100%)}
+#video-hub .vh-subheader h2{font-size:1.1rem;font-weight:800;letter-spacing:-0.5px}
+#video-hub .vh-subheader .sub{font-size:0.72rem;opacity:0.85;margin-top:2px}
+#video-hub .header-right{display:flex;align-items:center;gap:10px}
+#video-hub .platform-switch{display:flex;background:rgba(255,255,255,0.2);
+  border-radius:10px;padding:3px;gap:3px}
+#video-hub .plat-btn{padding:7px 14px;border:none;border-radius:8px;cursor:pointer;
+  font-weight:700;font-size:0.82rem;transition:all 0.2s;
+  background:transparent;color:rgba(255,255,255,0.75)}
+#video-hub .plat-btn:hover{background:rgba(255,255,255,0.15);color:white}
+#video-hub .plat-btn.active{background:white}
+#video-hub .plat-btn.tiktok-btn.active{color:#c97d8a}
+#video-hub .plat-btn.twitter-btn.active{color:#1d9bf0}
+#video-hub .run-btn{background:white;border:none;padding:8px 18px;
+  border-radius:8px;font-weight:700;cursor:pointer;font-size:0.82rem;transition:all 0.2s}
+#video-hub .vh-subheader.tiktok .run-btn{color:#c97d8a}
+#video-hub .vh-subheader.tiktok .run-btn:hover{background:#fff0ed}
+#video-hub .vh-subheader.twitter .run-btn{color:#1d9bf0}
+#video-hub .vh-subheader.twitter .run-btn:hover{background:#e8f4ff}
+#video-hub .run-btn:disabled{opacity:0.6;cursor:not-allowed;transform:none}
+#video-hub .v-layout{display:flex;height:calc(100vh - 126px)}
+#video-hub .v-sidebar{width:280px;min-width:280px;background:white;padding:20px;
+  overflow-y:auto;border-right:1px solid #ede6e2;box-shadow:2px 0 8px rgba(0,0,0,0.04)}
+#video-hub .v-main{flex:1;overflow-y:auto;padding:24px}
+#video-hub .filter-section{margin-bottom:22px}
+#video-hub .filter-label{font-size:0.72rem;font-weight:700;color:#c97d8a;
+  text-transform:uppercase;letter-spacing:0.8px;margin-bottom:10px;display:block}
+#video-hub .filter-group{display:flex;flex-direction:column;gap:6px}
+#video-hub select,#video-hub input[type="text"],#video-hub input[type="number"]{
+  width:100%;padding:8px 10px;border:1.5px solid #e8ddd9;
+  border-radius:8px;font-size:0.85rem;color:#333;
+  background:#fdfaf9;transition:border 0.2s;outline:none}
+#video-hub select:focus,#video-hub input:focus{border-color:#c97d8a;background:white}
+#video-hub .range-row{display:flex;gap:6px;align-items:center}
+#video-hub .range-row input{flex:1}
+#video-hub .range-row span{color:#bbb;font-size:0.8rem;flex-shrink:0}
+#video-hub .date-btns{display:flex;flex-wrap:wrap;gap:5px}
+#video-hub .date-btn{padding:5px 10px;border:1.5px solid #e8ddd9;border-radius:6px;
+  font-size:0.78rem;cursor:pointer;background:#fdfaf9;color:#666;transition:all 0.15s}
+#video-hub .date-btn:hover{border-color:#c97d8a;color:#c97d8a}
+#video-hub .date-btn.active{background:#c97d8a;border-color:#c97d8a;color:white;font-weight:600}
+#video-hub .apply-btn{width:100%;padding:10px;background:#c97d8a;color:white;
+  border:none;border-radius:9px;font-weight:700;font-size:0.9rem;
+  cursor:pointer;margin-top:8px;transition:background 0.2s}
+#video-hub .apply-btn:hover{background:#b56a77}
+#video-hub .clear-btn{width:100%;padding:8px;background:none;color:#aaa;
+  border:1.5px solid #e8ddd9;border-radius:9px;font-size:0.82rem;
+  cursor:pointer;margin-top:6px;transition:all 0.2s}
+#video-hub .clear-btn:hover{border-color:#c97d8a;color:#c97d8a}
+#video-hub hr.divider{border:none;border-top:1.5px solid #f0e8e4;margin:18px 0}
+#video-hub .stats-bar{display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap}
+#video-hub .stat-chip{background:white;border-radius:10px;padding:12px 18px;
+  box-shadow:0 1px 4px rgba(0,0,0,0.06);flex:1;min-width:100px}
+#video-hub .stat-chip .n{font-size:1.5rem;font-weight:800;color:#c97d8a}
+#video-hub .stat-chip .l{font-size:0.72rem;color:#999;margin-top:2px}
+#video-hub .tabs{display:flex;gap:4px;margin-bottom:20px}
+#video-hub .tab{padding:9px 18px;border-radius:8px;font-size:0.85rem;font-weight:600;
+  cursor:pointer;border:none;background:white;color:#999;
+  box-shadow:0 1px 3px rgba(0,0,0,0.06);transition:all 0.15s}
+#video-hub .tab:hover{color:#c97d8a}
+#video-hub .tab.active{background:#c97d8a;color:white;box-shadow:0 2px 8px rgba(201,125,138,0.35)}
+#video-hub .sort-bar{display:flex;align-items:center;gap:10px;margin-bottom:16px;
+  background:white;padding:10px 16px;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.05)}
+#video-hub .sort-bar label{font-size:0.8rem;color:#888;white-space:nowrap}
+#video-hub .sort-bar select{width:auto;flex:1;padding:6px 10px;font-size:0.82rem}
+#video-hub .result-count{margin-left:auto;font-size:0.8rem;color:#aaa;white-space:nowrap}
+#video-hub .video-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+#video-hub .video-card{background:white;border-radius:14px;overflow:hidden;
+  box-shadow:0 1px 4px rgba(0,0,0,0.06);transition:transform 0.15s,box-shadow 0.15s;
+  display:flex;flex-direction:column}
+#video-hub .video-card:hover{transform:translateY(-2px);box-shadow:0 4px 16px rgba(0,0,0,0.1)}
+#video-hub .card-thumb{position:relative;width:100%;aspect-ratio:9/16;max-height:200px;
+  overflow:hidden;background:#f0e8e4;flex-shrink:0}
+#video-hub .card-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+#video-hub .card-thumb .thumb-overlay{position:absolute;inset:0;
+  background:linear-gradient(to top,rgba(0,0,0,0.5) 0%,transparent 50%);pointer-events:none}
+#video-hub .card-thumb .thumb-duration{position:absolute;bottom:8px;right:8px;
+  background:rgba(0,0,0,0.65);color:white;font-size:0.72rem;font-weight:600;padding:2px 7px;border-radius:6px}
+#video-hub .card-thumb .thumb-views{position:absolute;bottom:8px;left:8px;
+  background:rgba(0,0,0,0.65);color:white;font-size:0.72rem;font-weight:600;padding:2px 7px;border-radius:6px}
+#video-hub .video-preview-popup{display:none;position:fixed;z-index:9999;
+  width:340px;height:580px;background:#000;border-radius:16px;
+  box-shadow:0 12px 48px rgba(0,0,0,0.35);overflow:hidden;pointer-events:none}
+#video-hub .video-preview-popup.active{display:block}
+#video-hub .video-preview-popup iframe{width:100%;height:100%;border:none}
+#video-hub .card-thumb .hover-play{position:absolute;inset:0;
+  display:flex;align-items:center;justify-content:center;
+  opacity:0;transition:opacity 0.2s;background:rgba(0,0,0,0.25);pointer-events:none}
+#video-hub .card-thumb:hover .hover-play{opacity:1}
+#video-hub .hover-play-icon{width:48px;height:48px;background:rgba(255,255,255,0.9);
+  border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-size:1.4rem;color:#e8a598;box-shadow:0 4px 16px rgba(0,0,0,0.2)}
+#video-hub .card-body{padding:14px;display:flex;flex-direction:column;gap:9px;flex:1}
+#video-hub .card-rank{font-size:0.7rem;color:#ddd;font-weight:700}
+#video-hub .card-creator{display:flex;align-items:center;gap:8px}
+#video-hub .creator-avatar{width:32px;height:32px;border-radius:50%;object-fit:cover;
+  border:2px solid #f5ece8;flex-shrink:0;background:#f0e8e4}
+#video-hub .creator-info{flex:1;min-width:0}
+#video-hub .card-creator a{font-weight:800;font-size:0.9rem;color:#c97d8a;text-decoration:none;
+  display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#video-hub .card-creator a:hover{text-decoration:underline}
+#video-hub .verified-badge{background:#e8f4ff;color:#4a9eff;font-size:0.65rem;
+  padding:2px 6px;border-radius:10px;font-weight:700}
+#video-hub .followers-tag{font-size:0.72rem;color:#aaa}
+#video-hub .card-caption{font-size:0.82rem;color:#555;line-height:1.4;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+#video-hub .metrics-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+#video-hub .metric{background:#fdf8f7;border-radius:8px;padding:8px 10px}
+#video-hub .metric .mv{font-size:1rem;font-weight:800;color:#333}
+#video-hub .metric .ml{font-size:0.68rem;color:#bbb;margin-top:1px}
+#video-hub .tags-row{display:flex;flex-wrap:wrap;gap:4px}
+#video-hub .hashtag{background:#fdf0ee;color:#c97d8a;font-size:0.7rem;
+  padding:3px 8px;border-radius:12px;font-weight:500;cursor:pointer;transition:background 0.15s}
+#video-hub .hashtag:hover{background:#c97d8a;color:white}
+#video-hub .card-footer{display:flex;justify-content:space-between;align-items:center;
+  padding-top:4px;border-top:1px solid #f5ece8}
+#video-hub .source-tag{font-size:0.7rem;color:#ddd}
+#video-hub .watch-btn{font-size:0.78rem;color:#c97d8a;text-decoration:none;font-weight:600}
+#video-hub .watch-btn:hover{text-decoration:underline}
+#video-hub .creators-table-wrap{background:white;border-radius:14px;overflow:hidden;
+  box-shadow:0 1px 4px rgba(0,0,0,0.06)}
+#video-hub table{width:100%;border-collapse:collapse}
+#video-hub th{background:#fdf0ee;color:#c97d8a;padding:12px 16px;text-align:left;
+  font-size:0.78rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;
+  cursor:pointer;user-select:none;white-space:nowrap}
+#video-hub th:hover{background:#fae6e2}
+#video-hub th .sort-arrow{margin-left:4px;opacity:0.4}
+#video-hub th.sorted .sort-arrow{opacity:1}
+#video-hub td{padding:12px 16px;font-size:0.85rem;border-bottom:1px solid #f8f2f0}
+#video-hub tr:last-child td{border-bottom:none}
+#video-hub tr:hover td{background:#fffaf9}
+#video-hub td a{color:#c97d8a;text-decoration:none;font-weight:600}
+#video-hub td a:hover{text-decoration:underline}
+#video-hub .tags-cloud{display:flex;flex-wrap:wrap;gap:8px}
+#video-hub .tag-pill{background:white;border-radius:20px;padding:8px 14px;
+  box-shadow:0 1px 4px rgba(0,0,0,0.06);cursor:pointer;
+  transition:all 0.15s;border:1.5px solid transparent}
+#video-hub .tag-pill:hover{border-color:#c97d8a}
+#video-hub .tag-pill .tn{color:#c97d8a;font-weight:700;font-size:0.9rem}
+#video-hub .tag-pill .ts{color:#aaa;font-size:0.75rem;margin-top:2px}
+#video-hub .audio-table{background:white;border-radius:14px;overflow:hidden;
+  box-shadow:0 1px 4px rgba(0,0,0,0.06)}
+#video-hub .empty{text-align:center;padding:60px 20px;color:#ccc}
+#video-hub .empty .icon{font-size:3rem;margin-bottom:12px}
+#video-hub .empty p{font-size:0.9rem}
+#video-hub .strategy-tab{background:linear-gradient(135deg,#e8a598,#c97d8a) !important;color:white !important}
+#video-hub .strategy-tab.active{background:linear-gradient(135deg,#c97d8a,#a5566a) !important}
+#video-hub .strategy-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px}
+@media(max-width:900px){ #video-hub .strategy-grid{grid-template-columns:1fr} }
+#video-hub .strategy-card{background:white;border-radius:14px;padding:20px;
+  box-shadow:0 1px 4px rgba(0,0,0,0.06)}
+#video-hub .strategy-card h3{font-size:0.95rem;font-weight:800;color:#333;
+  margin-bottom:14px;padding-bottom:8px;border-bottom:2px solid #f5ece8}
+#video-hub .format-bar{display:flex;flex-direction:column;gap:10px}
+#video-hub .format-row{display:flex;align-items:center;gap:10px}
+#video-hub .format-label{width:110px;font-size:0.8rem;font-weight:600;color:#555;flex-shrink:0}
+#video-hub .format-track{flex:1;background:#f5ece8;border-radius:20px;height:8px;overflow:hidden}
+#video-hub .format-fill{height:100%;border-radius:20px;background:linear-gradient(90deg,#e8a598,#c97d8a)}
+#video-hub .format-stat{font-size:0.75rem;color:#aaa;width:60px;text-align:right;flex-shrink:0}
+#video-hub .format-badge{display:inline-block;padding:2px 8px;border-radius:10px;
+  font-size:0.68rem;font-weight:700;margin-right:4px}
+.fmt-tutorial{background:#e8f4ff;color:#4a9eff}
+.fmt-routine{background:#e8ffe8;color:#2d9a2d}
+.fmt-review{background:#fff3e8;color:#e8832a}
+.fmt-beforeafter{background:#f0e8ff;color:#8a4aef}
+.fmt-haul{background:#ffe8f0;color:#e84a8a}
+.fmt-grwm{background:#fff8e8;color:#c8a020}
+.fmt-product{background:#fdf0ee;color:#c97d8a}
+.fmt-other{background:#f5f5f5;color:#999}
+#video-hub .product-list{display:flex;flex-direction:column;gap:8px}
+#video-hub .product-row{display:flex;align-items:center;gap:10px}
+#video-hub .product-name{font-size:0.85rem;font-weight:600;color:#333;width:120px;flex-shrink:0;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#video-hub .product-bar-wrap{flex:1;background:#f5ece8;border-radius:20px;height:7px;overflow:hidden}
+#video-hub .product-bar{height:100%;border-radius:20px;background:linear-gradient(90deg,#e8a598,#c97d8a)}
+#video-hub .product-count{font-size:0.72rem;color:#aaa;width:40px;text-align:right;flex-shrink:0}
+#video-hub .idea-list{display:flex;flex-direction:column;gap:10px}
+#video-hub .idea-card{background:#fdf8f7;border-radius:10px;padding:12px 14px;
+  border-left:3px solid #c97d8a;cursor:pointer;transition:background 0.15s}
+#video-hub .idea-card:hover{background:#fdf0ee}
+#video-hub .idea-format{font-size:0.68rem;font-weight:700;color:#c97d8a;
+  text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px}
+#video-hub .idea-title{font-size:0.88rem;font-weight:700;color:#333;margin-bottom:4px}
+#video-hub .idea-meta{font-size:0.72rem;color:#aaa}
+#video-hub .duration-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+#video-hub .dur-card{background:#fdf8f7;border-radius:10px;padding:12px;
+  text-align:center;border:2px solid transparent}
+#video-hub .dur-card.best{border-color:#c97d8a;background:#fdf0ee}
+#video-hub .dur-card .dv{font-size:1.4rem;font-weight:800;color:#c97d8a}
+#video-hub .dur-card .dl{font-size:0.72rem;color:#aaa;margin-top:2px}
+#video-hub .dur-card .ds{font-size:0.78rem;color:#888;margin-top:4px;font-weight:600}
+#video-hub .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:200;
+  display:flex;align-items:center;justify-content:center}
+#video-hub .modal{background:white;border-radius:16px;padding:28px;max-width:500px;width:90%;
+  box-shadow:0 8px 40px rgba(0,0,0,0.2)}
+#video-hub .modal h3{font-size:1.1rem;font-weight:800;margin-bottom:16px;color:#333}
+#video-hub .modal-section{margin-bottom:14px}
+#video-hub .modal-label{font-size:0.72rem;font-weight:700;color:#c97d8a;text-transform:uppercase;
+  letter-spacing:0.5px;margin-bottom:6px;display:block}
+#video-hub .modal-value{background:#fdf8f7;border-radius:8px;padding:10px 12px;
+  font-size:0.85rem;color:#333;line-height:1.5}
+#video-hub .modal-close{width:100%;padding:10px;background:#c97d8a;color:white;border:none;
+  border-radius:9px;font-weight:700;cursor:pointer;margin-top:8px}
+#video-hub .copy-fmt-btn{background:#fdf0ee;color:#c97d8a;border:none;padding:4px 10px;
+  border-radius:6px;font-size:0.72rem;font-weight:700;cursor:pointer;transition:background 0.15s}
+#video-hub .copy-fmt-btn:hover{background:#c97d8a;color:white}
+#video-hub .tweet-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px}
+#video-hub .tweet-card{background:white;border-radius:14px;padding:18px;
+  box-shadow:0 1px 4px rgba(0,0,0,0.06);transition:transform 0.15s,box-shadow 0.15s;
+  display:flex;flex-direction:column;gap:10px;border-left:3px solid #1d9bf0}
+#video-hub .tweet-card:hover{transform:translateY(-2px);box-shadow:0 4px 16px rgba(0,0,0,0.1)}
+#video-hub .tweet-author{display:flex;align-items:center;gap:10px}
+#video-hub .tweet-avatar{width:42px;height:42px;border-radius:50%;object-fit:cover;
+  border:2px solid #e8f4ff;flex-shrink:0;background:#e8f4ff}
+#video-hub .tweet-name{font-weight:800;font-size:0.92rem;color:#1a1a1a}
+#video-hub .tweet-handle{font-size:0.78rem;color:#888}
+#video-hub .tweet-text{font-size:0.88rem;color:#333;line-height:1.5}
+#video-hub .tweet-img{width:100%;border-radius:10px;object-fit:cover;max-height:200px}
+#video-hub .tweet-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+#video-hub .tweet-metric{background:#f0f8ff;border-radius:8px;padding:7px 8px;text-align:center}
+#video-hub .tweet-metric .mv{font-size:0.95rem;font-weight:800;color:#1d9bf0}
+#video-hub .tweet-metric .ml{font-size:0.65rem;color:#aaa;margin-top:1px}
+#video-hub .tweet-tags{display:flex;flex-wrap:wrap;gap:4px}
+#video-hub .tweet-tag{background:#e8f4ff;color:#1d9bf0;font-size:0.7rem;
+  padding:3px 8px;border-radius:12px;font-weight:500;cursor:pointer}
+#video-hub .tweet-tag:hover{background:#1d9bf0;color:white}
+#video-hub .tweet-footer{display:flex;justify-content:space-between;align-items:center;
+  padding-top:6px;border-top:1px solid #e8f4ff;font-size:0.75rem;color:#aaa}
+#video-hub .tweet-link{color:#1d9bf0;text-decoration:none;font-weight:600;font-size:0.78rem}
+#video-hub .tweet-link:hover{text-decoration:underline}
+#video-hub .x-verified{background:#1d9bf0;color:white;font-size:0.65rem;
+  padding:2px 6px;border-radius:10px;font-weight:700;margin-left:4px}
+#video-hub #v-toast{position:fixed;bottom:24px;right:24px;background:#333;color:white;
+  padding:12px 20px;border-radius:10px;font-size:0.85rem;
+  display:none;z-index:999;box-shadow:0 4px 16px rgba(0,0,0,0.2);max-width:300px}
+@media(max-width:768px){
+  #video-hub .v-layout{flex-direction:column;height:auto}
+  #video-hub .v-sidebar{width:100%;border-right:none;border-bottom:1px solid #ede6e2}
+  #video-hub .v-main{padding:16px}
+  #video-hub .video-grid{grid-template-columns:1fr}
+  #video-hub .tweet-grid{grid-template-columns:1fr}
+}
 </style>
 </head>
 <body>
@@ -671,18 +1097,23 @@ select.fs:focus{border-color:var(--pink);background:#fff}
 
 <header>
   <div class="h-left">
-    <span class="h-logo">🛒</span>
+    <span class="h-logo" id="mainLogo">🛒</span>
     <div>
-      <div class="h-title">Beauty Product Rankings</div>
-      <div class="h-sub">나라별 뷰티 베스트셀러</div>
+      <div class="h-title" id="mainTitle">Beauty Product Rankings</div>
+      <div class="h-sub" id="mainSub">나라별 뷰티 베스트셀러</div>
     </div>
   </div>
   <div class="h-right">
+    <div class="mode-switch">
+      <button class="mode-btn active" id="mode-product" onclick="switchMode('product')">📦 Product</button>
+      <button class="mode-btn" id="mode-video" onclick="switchMode('video')">🎬 Video</button>
+    </div>
     <span class="upd" id="updLbl">—</span>
     <button id="refreshBtn" onclick="refreshData()">↻ 새로고침</button>
   </div>
 </header>
 
+<div id="product-hub">
 <div class="ctabs" id="tabs"></div>
 
 <div class="toolbar" id="toolbar">
@@ -713,17 +1144,237 @@ select.fs:focus{border-color:var(--pink);background:#fff}
     <button class="ys-pill" data-sub="メイクアップ" onclick="setQjSub(this)">메이크업</button>
     <button class="ys-pill" data-sub="ヘアケア" onclick="setQjSub(this)">헤어케어</button>
   </div>
+  <div class="ys-pills" id="ttPills" style="display:none">
+    <button class="ys-pill active" data-sub="All" onclick="setTtSub(this)">All</button>
+    <button class="ys-pill" data-sub="Skincare" onclick="setTtSub(this)">스킨케어</button>
+    <button class="ys-pill" data-sub="Makeup" onclick="setTtSub(this)">메이크업</button>
+    <button class="ys-pill" data-sub="Hair Care" onclick="setTtSub(this)">헤어케어</button>
+    <button class="ys-pill" data-sub="Body Care" onclick="setTtSub(this)">바디케어</button>
+  </div>
+  <div class="ys-pills" id="ttPeriodPills" style="display:none">
+    <span style="font-size:.75rem;font-weight:700;color:var(--muted);margin-right:2px">기간:</span>
+    <button class="ys-pill" data-period="total" onclick="setTtPeriod(this)">누적</button>
+    <button class="ys-pill active" data-period="30d" onclick="setTtPeriod(this)">30일</button>
+    <button class="ys-pill" data-period="7d" onclick="setTtPeriod(this)">7일</button>
+  </div>
   <span class="rc" id="rc"></span>
 </div>
 
 <div class="gw" id="gw"></div>
+</div><!-- /product-hub -->
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<!-- VIDEO HUB (hidden until switched) -->
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<div id="video-hub" style="display:none">
+
+<div class="vh-subheader tiktok" id="vh-subheader">
+  <div>
+    <h2 id="vh-hub-title">K-Beauty TikTok Hub</h2>
+    <div class="sub" id="vh-last-updated">Loading data...</div>
+  </div>
+  <div class="header-right">
+    <div class="platform-switch">
+      <button class="plat-btn tiktok-btn active" id="btn-tiktok" onclick="vSwitchPlatform('tiktok')">🎵 TikTok</button>
+      <button class="plat-btn twitter-btn" id="btn-twitter" onclick="vSwitchPlatform('twitter')">𝕏 Twitter</button>
+    </div>
+    <button class="run-btn" id="v-run-btn" onclick="vTriggerScrape()">Run New Scrape</button>
+  </div>
+</div>
+
+<div class="v-layout" id="v-tiktok-layout">
+  <!-- SIDEBAR FILTERS -->
+  <aside class="v-sidebar">
+    <div class="filter-section">
+      <span class="filter-label">Date Range</span>
+      <div class="date-btns">
+        <button class="date-btn active" onclick="vSetDateRange('all', this)">All Time</button>
+        <button class="date-btn" onclick="vSetDateRange(1, this)">Today</button>
+        <button class="date-btn" onclick="vSetDateRange(7, this)">7 Days</button>
+        <button class="date-btn" onclick="vSetDateRange(30, this)">30 Days</button>
+        <button class="date-btn" onclick="vSetDateRange(90, this)">90 Days</button>
+      </div>
+    </div>
+    <hr class="divider">
+    <div class="filter-section">
+      <span class="filter-label">Search</span>
+      <div class="filter-group">
+        <input type="text" id="vf-creator" placeholder="Creator username...">
+        <input type="text" id="vf-hashtag" placeholder="Hashtag (e.g. glasskin)...">
+        <input type="text" id="vf-keyword" placeholder="Caption keyword...">
+      </div>
+    </div>
+    <hr class="divider">
+    <div class="filter-section">
+      <span class="filter-label">Min Views</span>
+      <div class="range-row">
+        <input type="number" id="vf-views-min" placeholder="e.g. 100000" min="0" value="100000">
+        <span>+</span>
+      </div>
+    </div>
+    <div class="filter-section">
+      <span class="filter-label">Min Followers</span>
+      <input type="number" id="vf-followers-min" placeholder="e.g. 10000" min="0" value="500">
+    </div>
+    <hr class="divider">
+    <div class="filter-section">
+      <span class="filter-label">Region / Country</span>
+      <select id="vf-region">
+        <option value="all">🌍 All Regions</option>
+        <option value="🇺🇸 USA / UK">🇺🇸 USA / UK</option>
+        <option value="🇰🇷 Korea">🇰🇷 Korea</option>
+        <option value="🇨🇳 China">🇨🇳 China</option>
+        <option value="🇹🇼 Taiwan">🇹🇼 Taiwan</option>
+        <option value="🇯🇵 Japan">🇯🇵 Japan</option>
+        <option value="🇮🇩 Indonesia">🇮🇩 Indonesia</option>
+        <option value="🇸🇬 Singapore">🇸🇬 Singapore</option>
+        <option value="🇹🇭 Thailand">🇹🇭 Thailand</option>
+        <option value="🇻🇳 Vietnam">🇻🇳 Vietnam</option>
+        <option value="🇵🇭 Philippines">🇵🇭 Philippines</option>
+        <option value="🇧🇷 Brazil">🇧🇷 Brazil</option>
+        <option value="🇪🇸 Spain / Mexico">🇪🇸 Spain / Mexico</option>
+        <option value="🇬🇧 UK">🇬🇧 UK</option>
+        <option value="🇦🇪 UAE">🇦🇪 UAE</option>
+        <option value="🌍 Other">🌍 Other</option>
+      </select>
+    </div>
+    <div class="filter-section">
+      <span class="filter-label">Source Dataset</span>
+      <select id="vf-dataset">
+        <option value="all">All Datasets</option>
+      </select>
+    </div>
+    <div class="filter-section">
+      <span class="filter-label">Source Hashtag</span>
+      <select id="vf-source-tag">
+        <option value="all">All Hashtags</option>
+      </select>
+    </div>
+    <button class="apply-btn" onclick="vApplyFilters()">Apply Filters</button>
+    <button class="clear-btn" onclick="vClearFilters()">Clear All</button>
+  </aside>
+
+  <!-- MAIN CONTENT -->
+  <main class="v-main">
+    <div class="stats-bar" id="v-stats-bar">
+      <div class="stat-chip"><div class="n" id="vs-videos">—</div><div class="l">Videos</div></div>
+      <div class="stat-chip"><div class="n" id="vs-views">—</div><div class="l">Total Views</div></div>
+      <div class="stat-chip"><div class="n" id="vs-likes">—</div><div class="l">Total Likes</div></div>
+      <div class="stat-chip"><div class="n" id="vs-creators">—</div><div class="l">Creators</div></div>
+    </div>
+    <div class="tabs" id="v-tabs">
+      <button class="tab active" onclick="vSwitchTab('videos', this)">Viral Videos</button>
+      <button class="tab strategy-tab" onclick="vSwitchTab('strategy', this)">🎯 Strategy</button>
+      <button class="tab" onclick="vSwitchTab('creators', this)">Creators</button>
+      <button class="tab" onclick="vSwitchTab('hashtags', this)">Hashtags</button>
+      <button class="tab" onclick="vSwitchTab('topchannels', this)">Top Channels</button>
+      <button class="tab" onclick="vSwitchTab('audio', this)">Audio</button>
+    </div>
+    <div class="sort-bar" id="v-sort-bar">
+      <label>Sort by:</label>
+      <select id="v-sort-select" onchange="vRenderVideos()">
+        <option value="views">Views</option>
+        <option value="likes">Likes</option>
+        <option value="comments">Comments</option>
+        <option value="shares">Shares</option>
+        <option value="saves">Saves</option>
+        <option value="engagement">Engagement Score</option>
+        <option value="followers">Creator Followers</option>
+        <option value="date">Date (Newest)</option>
+      </select>
+      <div class="result-count" id="v-result-count"></div>
+    </div>
+    <div id="v-panel-videos"></div>
+    <div id="v-panel-strategy" style="display:none"></div>
+    <div id="v-panel-creators" style="display:none"></div>
+    <div id="v-panel-hashtags" style="display:none"></div>
+    <div id="v-panel-topchannels" style="display:none"></div>
+    <div id="v-panel-audio" style="display:none"></div>
+  </main>
+</div>
+
+<!-- Video hover preview popup -->
+<div class="video-preview-popup" id="vVideoPreview"></div>
+
+<!-- TWITTER HUB (hidden until switched) -->
+<div id="v-twitter-hub" style="display:none">
+  <div class="v-layout">
+    <aside class="v-sidebar" style="border-right-color:#e8f4ff">
+      <div class="filter-section">
+        <span class="filter-label" style="color:#1d9bf0">Date Range</span>
+        <div class="date-btns">
+          <button class="date-btn active" onclick="vSetXDateRange('all', this)">All Time</button>
+          <button class="date-btn" onclick="vSetXDateRange(1, this)">Today</button>
+          <button class="date-btn" onclick="vSetXDateRange(7, this)">7 Days</button>
+          <button class="date-btn" onclick="vSetXDateRange(30, this)">30 Days</button>
+        </div>
+      </div>
+      <hr class="divider">
+      <div class="filter-section">
+        <span class="filter-label" style="color:#1d9bf0">Search</span>
+        <div class="filter-group">
+          <input type="text" id="vxf-author" placeholder="@username...">
+          <input type="text" id="vxf-hashtag" placeholder="Hashtag (e.g. kbeauty)...">
+          <input type="text" id="vxf-keyword" placeholder="Keyword in tweet...">
+        </div>
+      </div>
+      <hr class="divider">
+      <div class="filter-section">
+        <span class="filter-label" style="color:#1d9bf0">Min Views</span>
+        <input type="number" id="vxf-views-min" placeholder="e.g. 10000" min="0">
+      </div>
+      <div class="filter-section">
+        <span class="filter-label" style="color:#1d9bf0">Min Retweets</span>
+        <input type="number" id="vxf-rt-min" placeholder="e.g. 100" min="0">
+      </div>
+      <hr class="divider">
+      <div class="filter-section">
+        <span class="filter-label" style="color:#1d9bf0">Sort By</span>
+        <select id="vx-sort-select" onchange="vRenderTweets()">
+          <option value="views">Views</option>
+          <option value="likes">Likes</option>
+          <option value="retweets">Retweets</option>
+          <option value="replies">Replies</option>
+          <option value="bookmarks">Bookmarks</option>
+          <option value="date">Date (Newest)</option>
+        </select>
+      </div>
+      <button class="apply-btn" style="background:#1d9bf0" onclick="vApplyXFilters()">Apply Filters</button>
+      <button class="clear-btn" onclick="vClearXFilters()">Clear All</button>
+    </aside>
+    <main class="v-main">
+      <div class="stats-bar" id="vx-stats-bar">
+        <div class="stat-chip"><div class="n" id="vxs-tweets" style="color:#1d9bf0">—</div><div class="l">Tweets</div></div>
+        <div class="stat-chip"><div class="n" id="vxs-views" style="color:#1d9bf0">—</div><div class="l">Total Views</div></div>
+        <div class="stat-chip"><div class="n" id="vxs-likes" style="color:#1d9bf0">—</div><div class="l">Total Likes</div></div>
+        <div class="stat-chip"><div class="n" id="vxs-accounts" style="color:#1d9bf0">—</div><div class="l">Accounts</div></div>
+      </div>
+      <div class="tabs" id="vx-tabs">
+        <button class="tab active" style="--ac:#1d9bf0" onclick="vSwitchXTab('tweets', this)">Viral Tweets</button>
+        <button class="tab" onclick="vSwitchXTab('xcreators', this)">Top Accounts</button>
+        <button class="tab" onclick="vSwitchXTab('xhashtags', this)">Trending Tags</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;background:white;padding:10px 16px;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.05)">
+        <span style="font-size:0.8rem;color:#888">Dataset:</span>
+        <select id="vx-date-pick" onchange="vLoadXDate(this.value)" style="width:auto;flex:1;padding:6px 10px;font-size:0.82rem"></select>
+        <div id="vx-result-count" style="margin-left:auto;font-size:0.8rem;color:#aaa"></div>
+      </div>
+      <div id="vx-panel-tweets"></div>
+      <div id="vx-panel-xcreators" style="display:none"></div>
+      <div id="vx-panel-xhashtags" style="display:none"></div>
+    </main>
+  </div>
+</div>
+
+<div id="v-toast"></div>
+</div><!-- /video-hub -->
 
 <script>
-let all = [], country = 'DB', ysSub = 'All Beauty', oySub = 'All', qjSub = 'All';
+let all = [], country = 'DB', ysSub = 'All Beauty', oySub = 'All', qjSub = 'All', ttSub = 'All', ttPeriod = '30d';
 
 // country order: ALL first, then US, UK, JP, then others
-const ORDER = ['DB','CH','IG','ALL','US','UK','JP','YS','AX','OY','QJ','DE','FR','CA','AU','IT','ES'];
-const TAB_LABELS = {'DB':'📊 전체 대시보드','CH':'📈 카테고리 분석','IG':'🧪 성분 트렌드','ALL':'전체','YS':'YesStyle','AX':'AliExpress','OY':'🌿 OliveYoung','QJ':'🛒 Qoo10 Japan'};
+const ORDER = ['DB','CH','IG','ALL','US','UK','JP','YS','AX','OY','QJ','TT','DE','FR','CA','AU','IT','ES'];
+const TAB_LABELS = {'DB':'📊 전체 대시보드','CH':'📈 카테고리 분석','IG':'🧪 성분 트렌드','ALL':'전체','YS':'YesStyle','AX':'AliExpress','OY':'🌿 OliveYoung','QJ':'🛒 Qoo10 Japan','TT':'🎵 TikTok Shop US'};
 
 async function loadData() {
   show('랭킹 데이터 불러오는 중...');
@@ -787,7 +1438,7 @@ function buildTabs() {
     btn.className = 'ctab' + (code===country ? ' active' : '');
     const cntHtml = (code==='DB'||code==='CH'||code==='IG') ? '' : `<span class="cnt">${counts[code]||0}</span>`;
     btn.innerHTML = (flag ? `<span class="flag">${flag}</span>` : '') + label + cntHtml;
-    btn.onclick = () => { country=code; ysSub='All Beauty'; oySub='All'; qjSub='All'; resetYsPills(); resetOyPills(); resetQjPills(); buildTabs(); render(); };
+    btn.onclick = () => { country=code; ysSub='All Beauty'; oySub='All'; qjSub='All'; ttSub='All'; ttPeriod='30d'; resetYsPills(); resetOyPills(); resetQjPills(); resetTtPills(); resetTtPeriodPills(); buildTabs(); render(); };
     el.appendChild(btn);
   });
 }
@@ -811,6 +1462,8 @@ function updateYsPills() {
   document.getElementById('ysPills').style.display = country === 'YS' ? 'flex' : 'none';
   document.getElementById('oyPills').style.display = country === 'OY' ? 'flex' : 'none';
   document.getElementById('qjPills').style.display = country === 'QJ' ? 'flex' : 'none';
+  document.getElementById('ttPills').style.display = country === 'TT' ? 'flex' : 'none';
+  document.getElementById('ttPeriodPills').style.display = country === 'TT' ? 'flex' : 'none';
 }
 
 function setOySub(btn) {
@@ -841,6 +1494,34 @@ function resetQjPills() {
   });
 }
 
+function setTtSub(btn) {
+  ttSub = btn.dataset.sub;
+  document.querySelectorAll('#ttPills .ys-pill').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  render();
+}
+
+function resetTtPills() {
+  ttSub = 'All';
+  document.querySelectorAll('#ttPills .ys-pill').forEach(p => {
+    p.classList.toggle('active', p.dataset.sub === 'All');
+  });
+}
+
+function setTtPeriod(btn) {
+  ttPeriod = btn.dataset.period;
+  document.querySelectorAll('#ttPeriodPills .ys-pill').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  render();
+}
+
+function resetTtPeriodPills() {
+  ttPeriod = '30d';
+  document.querySelectorAll('#ttPeriodPills .ys-pill').forEach(p => {
+    p.classList.toggle('active', p.dataset.period === '30d');
+  });
+}
+
 function starViz(n) {
   if (!n) return '';
   const f=Math.floor(n), h=n-f>=0.5?1:0;
@@ -862,11 +1543,20 @@ function getFiltered() {
     if (country==='YS' && ysSub!=='All Beauty' && i._ys_subcategory!==ysSub) return false;
     if (country==='OY' && oySub!=='All' && i._oy_subcategory!==oySub) return false;
     if (country==='QJ' && qjSub!=='All' && i._qj_subcategory!==qjSub) return false;
+    if (country==='TT' && ttSub!=='All' && i._tt_subcategory!==ttSub) return false;
     if (q && !(i.name||'').toLowerCase().includes(q) && !(i.asin||'').toLowerCase().includes(q)) return false;
     return true;
   });
   items.sort((a,b) => {
-    if (sort==='rank')       return (a.position||999)-(b.position||999);
+    if (sort==='rank') {
+      // TT 탭: 기간 필터에 따라 다른 판매량 기준으로 정렬
+      if (country==='TT' || (country==='ALL' && a._country_code==='TT')) {
+        const aVal = ttPeriod==='30d' ? (a._sale_30d_num||0) : ttPeriod==='7d' ? (a._sale_7d_num||0) : (a._sale_cnt_num||0);
+        const bVal = ttPeriod==='30d' ? (b._sale_30d_num||0) : ttPeriod==='7d' ? (b._sale_7d_num||0) : (b._sale_cnt_num||0);
+        if (a._country_code==='TT' && b._country_code==='TT') return bVal - aVal;
+      }
+      return (a.position||999)-(b.position||999);
+    }
     if (sort==='stars')      return (b.stars||0)-(a.stars||0);
     if (sort==='reviews')    return (b.reviewsCount||0)-(a.reviewsCount||0);
     if (sort==='price_asc')  return (a._price_value||9999)-(b._price_value||9999);
@@ -885,12 +1575,14 @@ function renderDashboard() {
     {code:'AX', label:'AliExpress'},
     {code:'OY', label:'OliveYoung', sub:'Top orders'},
     {code:'QJ', label:'Qoo10 JP'},
+    {code:'TT', label:'TikTok Shop', sortKey:'_sale_7d_num'},
   ];
   let prodHtml = '';
-  platforms.forEach(({code, label, sub}) => {
+  platforms.forEach(({code, label, sub, sortKey}) => {
     const flag = (all.find(i=>i._country_code===code)||{})._country_flag || '';
     const top5 = all.filter(i=>i._country_code===code && (!sub || i._oy_subcategory===sub))
-      .sort((a,b)=>(a.position||999)-(b.position||999)).slice(0,5);
+      .sort((a,b) => sortKey ? (b[sortKey]||0)-(a[sortKey]||0) : (a.position||999)-(b.position||999))
+      .slice(0,5);
     prodHtml += `<div class="dash-mini-col"><div class="dash-mini-hdr"><span>${flag}</span>${label}</div>`;
     top5.forEach((item,idx) => {
       const r=idx+1, rc=r===1?'r1':r===2?'r2':r===3?'r3':'rn';
@@ -1437,6 +2129,1107 @@ function drawDbIngChart() {
 }
 
 loadData();
+
+// ══════════════════════════════════════════════════════════════════════════
+// MODE SWITCHER
+// ══════════════════════════════════════════════════════════════════════════
+let currentMode = 'product';
+let videoHubInitialized = false;
+
+function switchMode(mode) {
+  currentMode = mode;
+  document.getElementById('product-hub').style.display = mode === 'product' ? '' : 'none';
+  document.getElementById('video-hub').style.display = mode === 'video' ? '' : 'none';
+  document.getElementById('mode-product').classList.toggle('active', mode === 'product');
+  document.getElementById('mode-video').classList.toggle('active', mode === 'video');
+  const title = document.getElementById('mainTitle');
+  const sub = document.getElementById('mainSub');
+  const logo = document.getElementById('mainLogo');
+  const refreshBtn = document.getElementById('refreshBtn');
+  if (mode === 'product') {
+    title.textContent = 'Beauty Product Rankings';
+    sub.textContent = '나라별 뷰티 베스트셀러';
+    logo.textContent = '🛒';
+    refreshBtn.style.display = '';
+    document.getElementById('updLbl').style.display = '';
+  } else {
+    title.textContent = 'K-Beauty Research Hub';
+    sub.textContent = 'TikTok & X 바이럴 컨텐츠 분석';
+    logo.textContent = '🔬';
+    refreshBtn.style.display = 'none';
+    document.getElementById('updLbl').style.display = 'none';
+    if (!videoHubInitialized) { initVideoHub(); videoHubInitialized = true; }
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// VIDEO HUB JAVASCRIPT (all functions prefixed with v)
+// ══════════════════════════════════════════════════════════════════════════
+
+// ── State ──
+let vAllData    = [];
+let vFiltered   = [];
+let vDateRange  = 'all';
+let vActiveTab  = 'videos';
+let vAllDates   = [];
+let vxAllData   = [];
+let vxFiltered  = [];
+let vxDateRange = 'all';
+let vxActiveTab = 'tweets';
+let vxAllDates  = [];
+let vPlatform   = 'tiktok';
+
+// ── Utilities ──
+function vFmt(n) {
+  n = parseInt(n) || 0;
+  if (n >= 1e9)  return (n/1e9).toFixed(1)  + 'B';
+  if (n >= 1e6)  return (n/1e6).toFixed(1)  + 'M';
+  if (n >= 1e3)  return (n/1e3).toFixed(1)  + 'K';
+  return n.toString();
+}
+function vToast(msg, ms=4000) {
+  const el = document.getElementById('v-toast');
+  el.textContent = msg; el.style.display = 'block';
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.style.display = 'none', ms);
+}
+function vEsc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Data loading ──
+async function initVideoHub() {
+  const r = await fetch('/api/dates');
+  vAllDates = await r.json();
+  const sel = document.getElementById('vf-dataset');
+  vAllDates.forEach(d => {
+    const o = document.createElement('option');
+    o.value = d; o.textContent = d;
+    sel.appendChild(o);
+  });
+  if (!vAllDates.length) {
+    vToast('No data yet. Click "Run New Scrape" to start.', 8000);
+    document.getElementById('vh-last-updated').textContent = 'No data available';
+    return;
+  }
+  await vLoadAllData();
+}
+
+async function vLoadAllData() {
+  vAllData = [];
+  const seen = new Set();
+  for (const date of vAllDates) {
+    const r = await fetch('/api/data/' + date);
+    const items = await r.json();
+    items.forEach(v => {
+      const key = v.id || (v.url + v.creator?.username);
+      if (!seen.has(key)) { seen.add(key); vAllData.push({...v, _dataset: date}); }
+    });
+  }
+  document.getElementById('vh-last-updated').textContent =
+    vAllData.length + ' videos across ' + vAllDates.length + ' dataset(s) · Latest: ' + vAllDates[0];
+  const tagSel = document.getElementById('vf-source-tag');
+  const sourceTags = [...new Set(vAllData.map(v => v.source_tag).filter(Boolean))].sort();
+  sourceTags.forEach(t => {
+    const o = document.createElement('option');
+    o.value = t; o.textContent = '#' + t;
+    tagSel.appendChild(o);
+  });
+  vApplyFilters();
+}
+
+// ── Filtering ──
+function vSetDateRange(val, btn) {
+  vDateRange = val;
+  document.querySelectorAll('#v-tiktok-layout .date-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+function vApplyFilters() {
+  const creator  = document.getElementById('vf-creator').value.trim().toLowerCase();
+  const hashtag  = document.getElementById('vf-hashtag').value.trim().toLowerCase().replace('#','');
+  const keyword  = document.getElementById('vf-keyword').value.trim().toLowerCase();
+  const viewsMin = parseInt(document.getElementById('vf-views-min').value) || 0;
+  const follMin  = parseInt(document.getElementById('vf-followers-min').value) || 0;
+  const region   = document.getElementById('vf-region').value;
+  const dataset  = document.getElementById('vf-dataset').value;
+  const srcTag   = document.getElementById('vf-source-tag').value;
+  const now    = Date.now();
+  const dayMs  = 86400000;
+  const cutoff = vDateRange === 'all' ? 0 : now - (vDateRange * dayMs);
+  vFiltered = vAllData.filter(v => {
+    const s = v.stats || {};
+    const c = v.creator || {};
+    if (vDateRange !== 'all') {
+      const ts = v.created_at ? new Date(v.created_at).getTime() : 0;
+      if (ts && ts < cutoff) return false;
+    }
+    if (creator  && !(c.username||'').toLowerCase().includes(creator)) return false;
+    if (hashtag  && !(v.hashtags||[]).some(t => t.toLowerCase().includes(hashtag))) return false;
+    if (keyword  && !(v.caption||'').toLowerCase().includes(keyword)) return false;
+    if ((s.views    || 0) < viewsMin) return false;
+    if ((c.followers|| 0) < follMin)  return false;
+    if (region !== 'all' && v.region !== region) return false;
+    if (dataset !== 'all' && v._dataset !== dataset) return false;
+    if (srcTag  !== 'all' && v.source_tag !== srcTag) return false;
+    return true;
+  });
+  vUpdateStats();
+  vRenderActiveTab();
+}
+
+function vClearFilters() {
+  document.getElementById('vf-creator').value = '';
+  document.getElementById('vf-hashtag').value = '';
+  document.getElementById('vf-keyword').value = '';
+  document.getElementById('vf-views-min').value = '100000';
+  document.getElementById('vf-followers-min').value = '500';
+  document.getElementById('vf-region').value = 'all';
+  document.getElementById('vf-dataset').value = 'all';
+  document.getElementById('vf-source-tag').value = 'all';
+  vDateRange = 'all';
+  document.querySelectorAll('#v-tiktok-layout .date-btn').forEach(b => b.classList.remove('active'));
+  document.querySelector('#v-tiktok-layout .date-btn').classList.add('active');
+  vApplyFilters();
+}
+
+// ── Stats ──
+function vUpdateStats() {
+  const totalViews = vFiltered.reduce((s,v) => s + (v.stats?.views||0), 0);
+  const totalLikes = vFiltered.reduce((s,v) => s + (v.stats?.likes||0), 0);
+  const creators   = new Set(vFiltered.map(v => v.creator?.username)).size;
+  document.getElementById('vs-videos').textContent   = vFmt(vFiltered.length);
+  document.getElementById('vs-views').textContent    = vFmt(totalViews);
+  document.getElementById('vs-likes').textContent    = vFmt(totalLikes);
+  document.getElementById('vs-creators').textContent = creators;
+}
+
+// ── Tab switching ──
+function vSwitchTab(tab, btn) {
+  vActiveTab = tab;
+  document.querySelectorAll('#v-tabs .tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('v-sort-bar').style.display = tab === 'videos' ? 'flex' : 'none';
+  vRenderActiveTab();
+}
+
+function vRenderActiveTab() {
+  if (vActiveTab === 'videos')      vRenderVideos();
+  if (vActiveTab === 'strategy')    vRenderStrategy();
+  if (vActiveTab === 'creators')    vRenderCreators();
+  if (vActiveTab === 'topchannels') vRenderTopChannels();
+  if (vActiveTab === 'hashtags')    vRenderHashtags();
+  if (vActiveTab === 'audio')       vRenderAudio();
+  ['videos','strategy','creators','topchannels','hashtags','audio'].forEach(t => {
+    document.getElementById('v-panel-' + t).style.display = t === vActiveTab ? 'block' : 'none';
+  });
+}
+
+// ── Format detection ──
+function vDetectFormat(v) {
+  const text = (v.caption||'').toLowerCase();
+  const tags  = (v.hashtags||[]).join(' ').toLowerCase();
+  const all   = text + ' ' + tags;
+  if (/\bgrwm\b|get ready with me/.test(all))                      return 'GRWM';
+  if (/before.?after|transformation|glow.?up/.test(all))           return 'Before & After';
+  if (/\bhaul\b|shopping|bought|unboxing/.test(all))               return 'Haul';
+  if (/tutorial|how.?to|step.?by.?step|diy/.test(all))            return 'Tutorial';
+  if (/routine|morning|night|pm |am |daily|evening/.test(all))     return 'Routine';
+  if (/review|honest|tried|worth it|rating|thoughts/.test(all))    return 'Review';
+  if (/recommend|must have|favorite|fave|top \d|best/.test(all))   return 'Recommendation';
+  return 'Product Showcase';
+}
+
+const V_FORMAT_CLASS = {
+  'Tutorial': 'fmt-tutorial', 'Routine': 'fmt-routine', 'Review': 'fmt-review',
+  'Before & After': 'fmt-beforeafter', 'Haul': 'fmt-haul', 'GRWM': 'fmt-grwm',
+  'Recommendation': 'fmt-product', 'Product Showcase': 'fmt-other'
+};
+
+const V_KBEAUTY_BRANDS = [
+  'cosrx','laneige','innisfree','etude','missha','some by mi','skin1004','anua','isntree',
+  'beauty of joseon','round lab','torriden','dr jart','klavuu','rom&nd','peripera',
+  'sulwhasoo','hera','espoir','3ce','nacific','apieu','tocobo','goodal','abib','ma:nyo',
+  'heimish','klairs','belif','banobagi','bano','medicube','vt cosmetics','tirtir',
+  'axis-y','by wishtrend','haruharu','purito','mixsoon','numbuzin','rovectin',
+  'farmacy','glow recipe','tatcha','dermalogica','cerave','the ordinary',
+  'matrigen','snail','cica','centella','niacinamide','ceramide','retinol',
+  'hyaluronic acid','vitamin c','aha','bha','pha','sunscreen','spf'
+];
+
+function vExtractProducts(caption, hashtags) {
+  const text = ((caption||'') + ' ' + (hashtags||[]).join(' ')).toLowerCase();
+  return V_KBEAUTY_BRANDS.filter(b => text.includes(b));
+}
+
+// ── Strategy panel ──
+function vRenderStrategy() {
+  const formatStats = {};
+  vFiltered.forEach(v => {
+    const fmt = vDetectFormat(v);
+    if (!formatStats[fmt]) formatStats[fmt] = { count:0, views:0, likes:0 };
+    formatStats[fmt].count++;
+    formatStats[fmt].views += v.stats?.views||0;
+    formatStats[fmt].likes += v.stats?.likes||0;
+  });
+  const fmtSorted = Object.entries(formatStats).sort((a,b) => b[1].views - a[1].views);
+  const maxFmtViews = fmtSorted[0]?.[1].views || 1;
+  const durBuckets = { '0–15s':[], '15–30s':[], '30–60s':[], '60s+':[] };
+  vFiltered.forEach(v => {
+    const d = v.duration||0;
+    if      (d <= 15) durBuckets['0–15s'].push(v);
+    else if (d <= 30) durBuckets['15–30s'].push(v);
+    else if (d <= 60) durBuckets['30–60s'].push(v);
+    else              durBuckets['60s+'].push(v);
+  });
+  const durAvgViews = Object.entries(durBuckets).map(([label, vids]) => ({
+    label, count: vids.length,
+    avg: vids.length ? Math.round(vids.reduce((s,v)=>s+(v.stats?.views||0),0)/vids.length) : 0
+  }));
+  const bestDur = [...durAvgViews].sort((a,b)=>b.avg-a.avg)[0]?.label;
+  const productCount = {};
+  const productViews = {};
+  vFiltered.forEach(v => {
+    const prods = vExtractProducts(v.caption, v.hashtags);
+    prods.forEach(p => {
+      productCount[p] = (productCount[p]||0) + 1;
+      productViews[p] = (productViews[p]||0) + (v.stats?.views||0);
+    });
+  });
+  const topProducts = Object.entries(productCount)
+    .sort((a,b) => (productViews[b[0]]||0) - (productViews[a[0]]||0)).slice(0, 12);
+  const maxProd = topProducts[0]?.[1] || 1;
+  const ideas = vGenerateIdeas(fmtSorted, topProducts, productViews);
+
+  document.getElementById('v-panel-strategy').innerHTML = `
+    <div style="margin-bottom:16px;padding:14px 18px;background:linear-gradient(135deg,#fdf0ee,#fff8f7);
+         border-radius:12px;border-left:4px solid #c97d8a">
+      <div style="font-weight:800;color:#c97d8a;margin-bottom:4px">Your Content Strategy Engine</div>
+      <div style="font-size:0.83rem;color:#777">Based on ${vFiltered.length} viral K-beauty videos.
+      Find a winning format → duplicate it in a new language → post daily.</div>
+    </div>
+    <div class="strategy-grid">
+      <div class="strategy-card">
+        <h3>🏆 Winning Formats (by total views)</h3>
+        <div class="format-bar">
+          ${fmtSorted.map(([fmt, s]) => `
+            <div class="format-row" onclick="vFilterByFormat('${vEsc(fmt)}')" style="cursor:pointer;border-radius:8px;padding:4px 6px;transition:background 0.15s"
+                 onmouseenter="this.style.background='#fdf0ee'" onmouseleave="this.style.background='transparent'">
+              <div class="format-label">
+                <span class="format-badge ${V_FORMAT_CLASS[fmt]||'fmt-other'}">${fmt}</span>
+              </div>
+              <div class="format-track">
+                <div class="format-fill" style="width:${Math.round(s.views/maxFmtViews*100)}%"></div>
+              </div>
+              <div class="format-stat">${vFmt(s.views)}<br><span style="font-size:0.65rem">${s.count} vids</span></div>
+            </div>`).join('')}
+        </div>
+      </div>
+      <div class="strategy-card">
+        <h3>⏱ Best Video Duration (avg views)</h3>
+        <div class="duration-grid">
+          ${durAvgViews.map(d => `
+            <div class="dur-card ${d.label===bestDur?'best':''}">
+              <div class="dv">${d.label}</div>
+              <div class="dl">${d.count} videos</div>
+              <div class="ds">${vFmt(d.avg)} avg views${d.label===bestDur?' 🏆':''}</div>
+            </div>`).join('')}
+        </div>
+      </div>
+      <div class="strategy-card">
+        <h3>💄 Trending Products & Ingredients</h3>
+        ${topProducts.length ? `<div class="product-list">
+          ${topProducts.map(([prod, count]) => `
+            <div class="product-row">
+              <div class="product-name" title="${vEsc(prod)}">${vEsc(prod)}</div>
+              <div class="product-bar-wrap">
+                <div class="product-bar" style="width:${Math.round(count/maxProd*100)}%"></div>
+              </div>
+              <div class="product-count">${count}×</div>
+            </div>`).join('')}
+        </div>` : '<div style="color:#ccc;font-size:0.85rem">No product data in current filter.</div>'}
+      </div>
+      <div class="strategy-card">
+        <h3>💡 Ready-to-Use Video Ideas</h3>
+        <div style="font-size:0.75rem;color:#aaa;margin-bottom:10px">Click any idea to see its full template</div>
+        <div class="idea-list">
+          ${ideas.map(idea => `
+            <div class="idea-card" onclick='vShowIdeaModal(${JSON.stringify(idea)})'>
+              <div class="idea-format">
+                <span class="format-badge ${V_FORMAT_CLASS[idea.format]||'fmt-other'}">${idea.format}</span>
+              </div>
+              <div class="idea-title">${vEsc(idea.title)}</div>
+              <div class="idea-meta">${idea.duration} · ${idea.hashtags.slice(0,3).map(h=>'#'+h).join(' ')}</div>
+            </div>`).join('')}
+        </div>
+      </div>
+    </div>
+    <div class="strategy-card" style="margin-bottom:20px">
+      <h3>🎭 Faceless K-Beauty Channels to Study</h3>
+      <div style="font-size:0.75rem;color:#aaa;margin-bottom:14px">
+        Channels detected as faceless based on caption style — product-focused, no personal face
+        references, high avg views.
+      </div>
+      ${vRenderFacelessChannels()}
+    </div>
+    <div class="strategy-card" style="margin-bottom:20px">
+      <h3>🎬 Top Video Per Format — Your Winning Templates</h3>
+      <div style="font-size:0.75rem;color:#aaa;margin-bottom:14px">
+        Each of these is a proven format. Click "Copy Format" to get the exact template.
+      </div>
+      <div class="video-grid">${vRenderTopPerFormat()}</div>
+    </div>`;
+}
+
+function vGenerateIdeas(fmtSorted, topProducts, productViews) {
+  const prod1  = topProducts[0]?.[0] || 'K-Beauty Product';
+  const prod2  = topProducts[1]?.[0] || 'Korean skincare';
+  const prod3  = topProducts[2]?.[0] || 'glass skin routine';
+  return [
+    { format:'Tutorial', title:'How I Get Glass Skin Using '+prod1, duration:'30–60s',
+      hashtags:['glasskin','kbeauty','skincareroutine','koreanskincare'],
+      hook:'POV: I finally figured out how to get glass skin with '+prod1,
+      structure:'Hook (3s) → Before skin (3s) → Apply product step by step → After reveal → CTA' },
+    { format:'Review', title:'I Tried '+prod1+' For 7 Days — Honest Results', duration:'30–60s',
+      hashtags:['kbeautyreview','skincare','kbeauty','honest'],
+      hook:'I used '+prod1+' every day for 7 days. Here\'s what actually happened.',
+      structure:'Hook → Day 1 skin → Product application → Daily progression → Day 7 result → Verdict' },
+    { format:'Routine', title:'My Korean Night Routine Using Only '+prod2, duration:'45–90s',
+      hashtags:['koreanskincare','nightroutine','kbeauty','skincareroutine'],
+      hook:'My full Korean skincare routine using '+prod2+' — takes only 5 minutes',
+      structure:'Hook → Cleanse → Tone → Serum → Moisturize → SPF (if AM) → Final look' },
+    { format:'Before & After', title:prod1+' Before & After — 30 Day Results', duration:'15–30s',
+      hashtags:['beforeandafter','glowup','kbeauty','skincaretransformation'],
+      hook:'30 days of '+prod1+'. The results shocked me.',
+      structure:'Hook → Close-up before (3s) → Text: "30 days later" → Close-up after → Product reveal' },
+    { format:'Recommendation', title:'Top 3 Korean Skincare Products Under $20', duration:'30–45s',
+      hashtags:['kbeauty','affordable','koreanskincare','skincareproducts'],
+      hook:'3 Korean skincare products that changed my skin — all under $20',
+      structure:'Hook → Product 1 + result → Product 2 + result → Product 3 + result → Where to buy' },
+    { format:'GRWM', title:'GRWM: Korean Glass Skin Makeup Routine', duration:'60–90s',
+      hashtags:['grwm','kbeautymakeup','koreanmakeup','glasskin'],
+      hook:'GRWM using only Korean skincare + makeup for the glass skin look',
+      structure:'Hook → Skincare base → Primer → Foundation → Blush → Highlight → Final look' },
+    { format:'Haul', title:'K-Beauty Haul: Best Finds From '+prod3, duration:'30–60s',
+      hashtags:['kbeautyhaul','kbeauty','skincarehaul','koreanbeauty'],
+      hook:'I spent $50 on Korean beauty products so you don\'t have to',
+      structure:'Hook → Unbox each product → Quick demo → Rating → Total cost + where to buy' },
+  ];
+}
+
+function vShowIdeaModal(idea) {
+  const existing = document.getElementById('v-idea-modal');
+  if (existing) existing.remove();
+  const div = document.createElement('div');
+  div.id = 'v-idea-modal';
+  div.className = 'modal-overlay';
+  div.onclick = e => { if(e.target===div) div.remove(); };
+  div.innerHTML = '<div class="modal">' +
+    '<h3><span class="format-badge '+(V_FORMAT_CLASS[idea.format]||'fmt-other')+'">'+vEsc(idea.format)+'</span>' +
+    '&nbsp;'+vEsc(idea.title)+'</h3>' +
+    '<div class="modal-section"><span class="modal-label">Hook (Opening Line)</span><div class="modal-value">'+vEsc(idea.hook)+'</div></div>' +
+    '<div class="modal-section"><span class="modal-label">Video Structure</span><div class="modal-value">'+vEsc(idea.structure)+'</div></div>' +
+    '<div class="modal-section"><span class="modal-label">Target Duration</span><div class="modal-value">'+vEsc(idea.duration)+'</div></div>' +
+    '<div class="modal-section"><span class="modal-label">Hashtags to Use</span><div class="modal-value">'+idea.hashtags.map(h=>'#'+vEsc(h)).join('  ')+'</div></div>' +
+    '<button class="modal-close" onclick="document.getElementById(\'v-idea-modal\').remove()">Close</button></div>';
+  document.body.appendChild(div);
+}
+
+function vCopyFormat(data) {
+  const existing = document.getElementById('v-idea-modal');
+  if (existing) existing.remove();
+  const div = document.createElement('div');
+  div.id = 'v-idea-modal';
+  div.className = 'modal-overlay';
+  div.onclick = e => { if(e.target===div) div.remove(); };
+  div.innerHTML = '<div class="modal">' +
+    '<h3>Format Template <span class="format-badge '+(V_FORMAT_CLASS[data.format]||'fmt-other')+'" style="margin-left:8px">'+vEsc(data.format)+'</span></h3>' +
+    '<div class="modal-section"><span class="modal-label">Original Caption</span><div class="modal-value">'+vEsc(data.caption)+'</div></div>' +
+    '<div class="modal-section"><span class="modal-label">Duration</span><div class="modal-value">'+vEsc(data.duration)+'</div></div>' +
+    '<div class="modal-section"><span class="modal-label">Hashtags Used</span><div class="modal-value">'+(data.hashtags||[]).map(h=>'#'+vEsc(h)).join('  ')+'</div></div>' +
+    '<div class="modal-section"><span class="modal-label">Performance</span><div class="modal-value">'+vFmt(data.views)+' views · '+vFmt(data.likes)+' likes · by @'+vEsc(data.creator)+'</div></div>' +
+    '<div class="modal-section"><span class="modal-label">How to Replicate</span><div class="modal-value">1. Study the original video structure<br>2. Recreate the same format in your language<br>3. Keep same duration ('+vEsc(data.duration)+')<br>4. Use same hashtags + add your language hashtags<br>5. Adapt caption tone — keep the hook style</div></div>' +
+    '<a href="'+vEsc(data.url)+'" target="_blank" style="display:block;text-align:center;color:#c97d8a;font-size:0.85rem;margin-bottom:10px">Watch Original on TikTok →</a>' +
+    '<button class="modal-close" onclick="document.getElementById(\'v-idea-modal\').remove()">Close</button></div>';
+  document.body.appendChild(div);
+}
+
+// ── Faceless channel detection ──
+const V_FACELESS_SIGNALS = [
+  'review','rating','product','this product','try this','honest','worth it',
+  'recommendation','must have','top ','best ','affordable','dupes','dupe',
+  'before after','results','comparison','ingredients','what is','did you know',
+  'hack','tip','trick','secret','tutorial','how to','step by step',
+  'unboxing','haul','ranking'
+];
+const V_FACE_SIGNALS = [
+  'my face','my skin','my routine','i woke up','my morning','my night',
+  'come with me','follow me','my journey','my story','grwm','get ready with me',
+  'storytime','vlog','day in my life'
+];
+
+function vIsFacelessCaption(caption) {
+  const text = (caption||'').toLowerCase();
+  const faceScore    = V_FACE_SIGNALS.filter(s => text.includes(s)).length;
+  const productScore = V_FACELESS_SIGNALS.filter(s => text.includes(s)).length;
+  return productScore > faceScore && productScore >= 1;
+}
+
+function vRenderFacelessChannels() {
+  const map = {};
+  vFiltered.forEach(v => {
+    const c = v.creator||{};
+    const u = c.username;
+    if (!u) return;
+    if (!map[u]) map[u] = { ...c, videos: [], totalViews: 0, facelessCount: 0, totalCount: 0 };
+    map[u].videos.push(v);
+    map[u].totalViews += v.stats?.views||0;
+    map[u].totalCount++;
+    if (vIsFacelessCaption(v.caption)) map[u].facelessCount++;
+  });
+  const candidates = Object.values(map)
+    .filter(c => {
+      const ratio = c.facelessCount / Math.max(c.totalCount, 1);
+      const avgViews = c.totalViews / Math.max(c.totalCount, 1);
+      return ratio >= 0.5 && avgViews >= 50000;
+    })
+    .sort((a, b) => {
+      const avgA = a.totalViews / Math.max(a.totalCount, 1);
+      const avgB = b.totalViews / Math.max(b.totalCount, 1);
+      return avgB - avgA;
+    })
+    .slice(0, 12);
+  if (!candidates.length) {
+    return '<div style="color:#ccc;font-size:0.85rem;padding:20px;text-align:center">Not enough data yet.</div>';
+  }
+  return '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr style="background:#fdf0ee">' +
+    '<th style="padding:10px 14px;font-size:0.75rem;color:#c97d8a;text-align:left;font-weight:700">Channel</th>' +
+    '<th style="padding:10px 14px;font-size:0.75rem;color:#c97d8a;text-align:left;font-weight:700">Avg Views</th>' +
+    '<th style="padding:10px 14px;font-size:0.75rem;color:#c97d8a;text-align:left;font-weight:700">Total Views</th>' +
+    '<th style="padding:10px 14px;font-size:0.75rem;color:#c97d8a;text-align:left;font-weight:700">Videos</th>' +
+    '<th style="padding:10px 14px;font-size:0.75rem;color:#c97d8a;text-align:left;font-weight:700">Followers</th>' +
+    '<th style="padding:10px 14px;font-size:0.75rem;color:#c97d8a;text-align:left;font-weight:700">Faceless Score</th>' +
+    '</tr></thead><tbody>' +
+    candidates.map(c => {
+      const avgViews = Math.round(c.totalViews / Math.max(c.totalCount, 1));
+      const score    = Math.round(c.facelessCount / Math.max(c.totalCount, 1) * 100);
+      return '<tr style="border-bottom:1px solid #f5ece8">' +
+        '<td style="padding:12px 14px"><div style="display:flex;align-items:center;gap:10px">' +
+          (c.avatar ? '<img src="'+vEsc(c.avatar)+'" style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid #f5ece8;flex-shrink:0" onerror="this.style.display=\'none\'" loading="lazy">' : '') +
+          '<div><a href="'+vEsc(c.url)+'" target="_blank" style="color:#c97d8a;font-weight:700;text-decoration:none">@'+vEsc(c.username)+'</a>' +
+          (c.verified ? '<span style="color:#4a9eff;font-size:0.7rem"> ✓</span>' : '') +
+        '</div></div></td>' +
+        '<td style="padding:12px 14px;font-weight:800;font-size:1rem;color:#c97d8a">'+vFmt(avgViews)+'</td>' +
+        '<td style="padding:12px 14px;font-size:0.85rem">'+vFmt(c.totalViews)+'</td>' +
+        '<td style="padding:12px 14px;font-size:0.85rem">'+c.totalCount+'</td>' +
+        '<td style="padding:12px 14px;font-size:0.85rem">'+vFmt(c.followers)+'</td>' +
+        '<td style="padding:12px 14px"><div style="display:flex;align-items:center;gap:6px">' +
+          '<div style="flex:1;background:#f5ece8;border-radius:20px;height:6px;overflow:hidden"><div style="height:100%;border-radius:20px;background:linear-gradient(90deg,#e8a598,#c97d8a);width:'+score+'%"></div></div>' +
+          '<span style="font-size:0.75rem;color:#888;width:32px">'+score+'%</span></div></td></tr>';
+    }).join('') + '</tbody></table></div>';
+}
+
+function vRenderTopPerFormat() {
+  const byFormat = {};
+  vFiltered.forEach(v => {
+    const fmt = vDetectFormat(v);
+    if (!byFormat[fmt] || (v.stats?.views||0) > (byFormat[fmt].stats?.views||0)) {
+      byFormat[fmt] = v;
+    }
+  });
+  return Object.entries(byFormat).map(([fmt, v]) => {
+    const s = v.stats||{}; const c = v.creator||{};
+    const thumb = v.cover||'';
+    return '<div class="video-card">' +
+      (thumb ? '<a href="'+vEsc(v.url)+'" target="_blank" class="card-thumb"><img src="'+vEsc(thumb)+'" loading="lazy" onerror="this.parentElement.style.display=\'none\'"><div class="thumb-overlay"></div><div class="thumb-views">👁 '+vFmt(s.views)+'</div><div class="thumb-duration">'+(v.duration||0)+'s</div></a>' : '') +
+      '<div class="card-body">' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">' +
+          '<span class="format-badge '+(V_FORMAT_CLASS[fmt]||'fmt-other')+'">'+fmt+'</span>' +
+          '<button class="copy-fmt-btn" onclick=\'vCopyFormat('+JSON.stringify({format:fmt,caption:v.caption,duration:(v.duration||0)+"s",hashtags:v.hashtags||[],views:s.views,likes:s.likes,creator:c.username,url:v.url})+')\'>' +
+          'Copy Format</button></div>' +
+        '<div class="card-creator">' +
+          (c.avatar ? '<img class="creator-avatar" src="'+vEsc(c.avatar)+'" loading="lazy" onerror="this.style.display=\'none\'">' : '') +
+          '<div class="creator-info"><a href="'+vEsc(c.url)+'" target="_blank">@'+vEsc(c.username)+'</a>' +
+          '<div style="font-size:0.72rem;color:#aaa">'+vFmt(c.followers)+' followers</div></div></div>' +
+        '<div class="card-caption">'+vEsc(v.caption)+'</div>' +
+        '<div class="stats-row" style="margin-top:8px"><span><b>'+vFmt(s.views)+'</b> views</span> <span><b>'+vFmt(s.likes)+'</b> likes</span> <span><b>'+vFmt(s.shares)+'</b> shares</span></div>' +
+      '</div></div>';
+  }).join('');
+}
+
+// ── Video panel ──
+function vRenderVideos() {
+  const sortBy = document.getElementById('v-sort-select').value;
+  const sorted = [...vFiltered].sort((a,b) => {
+    if (sortBy === 'date') return new Date(b.created_at||0) - new Date(a.created_at||0);
+    if (sortBy === 'followers') return (b.creator?.followers||0) - (a.creator?.followers||0);
+    if (sortBy === 'engagement') return (b.engagement||0) - (a.engagement||0);
+    return (b.stats?.[sortBy]||0) - (a.stats?.[sortBy]||0);
+  });
+  document.getElementById('v-result-count').textContent = sorted.length + ' videos';
+  if (!sorted.length) {
+    document.getElementById('v-panel-videos').innerHTML =
+      '<div class="empty"><div class="icon">🔍</div><p>No videos match your filters.</p></div>';
+    return;
+  }
+  document.getElementById('v-panel-videos').innerHTML =
+    '<div class="video-grid">' +
+    sorted.map((v, i) => {
+      const s = v.stats || {};
+      const c = v.creator || {};
+      const tags = (v.hashtags||[]).slice(0,6).map(t =>
+        '<span class="hashtag" onclick="vFilterByTag(\''+vEsc(t)+'\')">#'+vEsc(t)+'</span>').join('');
+      const date = v.created_at ? new Date(v.created_at).toLocaleDateString() : '';
+      const thumb = v.cover || '';
+      const avatar = c.avatar || '';
+      return '<div class="video-card">' +
+        (thumb
+          ? '<a href="'+vEsc(v.url)+'" target="_blank" class="card-thumb" data-video-url="'+vEsc(v.url)+'" onmouseenter="vShowVideoPreview(this, event)" onmousemove="vMoveVideoPreview(event)" onmouseleave="vHideVideoPreview()"><img src="'+vEsc(thumb)+'" alt="video thumbnail" loading="lazy" onerror="this.parentElement.style.display=\'none\'"><div class="thumb-overlay"></div><div class="hover-play"><div class="hover-play-icon">▶</div></div><div class="thumb-views">👁 '+vFmt(s.views)+'</div><div class="thumb-duration">'+vFmt(v.duration)+'s</div></a>'
+          : '') +
+        '<div class="card-body">' +
+          '<div class="card-rank">#'+(i+1)+' · via #'+vEsc(v.source_tag)+' '+(date ? '· '+date : '')+' '+(v.region ? '· '+vEsc(v.region) : '')+'</div>' +
+          '<div class="card-creator">' +
+            (avatar
+              ? '<img class="creator-avatar" src="'+vEsc(avatar)+'" alt="avatar" onerror="this.style.display=\'none\'" loading="lazy">'
+              : '<div class="creator-avatar" style="display:flex;align-items:center;justify-content:center;font-size:14px;color:#ddd">👤</div>') +
+            '<div class="creator-info"><a href="'+vEsc(c.url)+'" target="_blank">@'+vEsc(c.username)+'</a>' +
+              '<div style="display:flex;align-items:center;gap:6px;margin-top:1px">' +
+                (c.verified ? '<span class="verified-badge">✓ Verified</span>' : '') +
+                '<span class="followers-tag">'+vFmt(c.followers)+' followers</span></div></div></div>' +
+          '<div class="card-caption">'+vEsc(v.caption)+'</div>' +
+          '<div class="metrics-grid">' +
+            '<div class="metric"><div class="mv">'+vFmt(s.likes)+'</div><div class="ml">Likes</div></div>' +
+            '<div class="metric"><div class="mv">'+vFmt(s.comments)+'</div><div class="ml">Comments</div></div>' +
+            '<div class="metric"><div class="mv">'+vFmt(s.shares)+'</div><div class="ml">Shares</div></div>' +
+            '<div class="metric"><div class="mv">'+vFmt(s.saves||s.collectCount)+'</div><div class="ml">Saves</div></div></div>' +
+          '<div class="tags-row">'+tags+'</div>' +
+          '<div class="card-footer"><span class="source-tag">Dataset: '+vEsc(v._dataset||'')+'</span>' +
+            '<a class="watch-btn" href="'+vEsc(v.url)+'" target="_blank">Watch on TikTok →</a></div>' +
+        '</div></div>';
+    }).join('') + '</div>';
+}
+
+function vFilterByTag(tag) {
+  document.getElementById('vf-hashtag').value = tag;
+  vApplyFilters();
+  vToast('Filtered by #'+tag);
+}
+
+function vFilterByFormat(format) {
+  const formatVideos = vFiltered.filter(v => vDetectFormat(v) === format);
+  const sorted = formatVideos.sort((a,b) => (b.stats?.views||0) - (a.stats?.views||0));
+  vActiveTab = 'videos';
+  document.querySelectorAll('#v-tabs .tab').forEach(t => t.classList.remove('active'));
+  document.querySelector('#v-tabs .tab').classList.add('active');
+  document.getElementById('v-sort-bar').style.display = 'flex';
+  ['videos','strategy','creators','topchannels','hashtags','audio'].forEach(t => {
+    document.getElementById('v-panel-' + t).style.display = t === 'videos' ? 'block' : 'none';
+  });
+  document.getElementById('v-result-count').textContent = sorted.length + ' videos ('+format+')';
+  if (!sorted.length) {
+    document.getElementById('v-panel-videos').innerHTML =
+      '<div class="empty"><div class="icon">🔍</div><p>No "'+format+'" videos found.</p></div>';
+    return;
+  }
+  document.getElementById('v-panel-videos').innerHTML =
+    '<div style="margin-bottom:16px;padding:12px 18px;background:#fdf0ee;border-radius:10px;display:flex;align-items:center;justify-content:space-between"><div><span class="format-badge '+(V_FORMAT_CLASS[format]||'fmt-other')+'" style="font-size:0.9rem;padding:4px 12px">'+format+'</span><span style="font-size:0.85rem;color:#888;margin-left:10px">'+sorted.length+' videos</span></div><button onclick="vRenderVideos()" style="background:#c97d8a;color:white;border:none;padding:6px 14px;border-radius:8px;font-weight:700;font-size:0.8rem;cursor:pointer">Show All</button></div><div class="video-grid">' +
+    sorted.map((v, i) => {
+      const s = v.stats || {}; const c = v.creator || {};
+      const tags = (v.hashtags||[]).slice(0,6).map(t => '<span class="hashtag" onclick="vFilterByTag(\''+vEsc(t)+'\')">#'+vEsc(t)+'</span>').join('');
+      const date = v.created_at ? new Date(v.created_at).toLocaleDateString() : '';
+      const thumb = v.cover || ''; const avatar = c.avatar || '';
+      return '<div class="video-card">' +
+        (thumb ? '<a href="'+vEsc(v.url)+'" target="_blank" class="card-thumb" data-video-url="'+vEsc(v.url)+'" onmouseenter="vShowVideoPreview(this, event)" onmousemove="vMoveVideoPreview(event)" onmouseleave="vHideVideoPreview()"><img src="'+vEsc(thumb)+'" loading="lazy" onerror="this.parentElement.style.display=\'none\'"><div class="thumb-overlay"></div><div class="hover-play"><div class="hover-play-icon">▶</div></div><div class="thumb-views">👁 '+vFmt(s.views)+'</div><div class="thumb-duration">'+vFmt(v.duration)+'s</div></a>' : '') +
+        '<div class="card-body"><div class="card-rank">#'+(i+1)+' · <span class="format-badge '+(V_FORMAT_CLASS[format]||'fmt-other')+'">'+format+'</span> · '+(date||'')+' '+(v.region ? '· '+vEsc(v.region) : '')+'</div><div class="card-creator">' +
+          (avatar ? '<img class="creator-avatar" src="'+vEsc(avatar)+'" onerror="this.style.display=\'none\'" loading="lazy">' : '<div class="creator-avatar" style="display:flex;align-items:center;justify-content:center;font-size:14px;color:#ddd">👤</div>') +
+          '<div class="creator-info"><a href="'+vEsc(c.url)+'" target="_blank">@'+vEsc(c.username)+'</a><div style="display:flex;align-items:center;gap:6px;margin-top:1px">'+(c.verified?'<span class="verified-badge">✓ Verified</span>':'')+'<span class="followers-tag">'+vFmt(c.followers)+' followers</span></div></div></div>' +
+          '<div class="card-caption">'+vEsc(v.caption)+'</div>' +
+          '<div class="metrics-grid"><div class="metric"><div class="mv">'+vFmt(s.likes)+'</div><div class="ml">Likes</div></div><div class="metric"><div class="mv">'+vFmt(s.comments)+'</div><div class="ml">Comments</div></div><div class="metric"><div class="mv">'+vFmt(s.shares)+'</div><div class="ml">Shares</div></div><div class="metric"><div class="mv">'+vFmt(s.saves||s.collectCount)+'</div><div class="ml">Saves</div></div></div>' +
+          '<div class="tags-row">'+tags+'</div><div class="card-footer"><span class="source-tag">Dataset: '+vEsc(v._dataset||'')+'</span><a class="watch-btn" href="'+vEsc(v.url)+'" target="_blank">Watch on TikTok →</a></div></div></div>';
+    }).join('') + '</div>';
+  vToast('Showing '+sorted.length+' "'+format+'" videos');
+}
+
+// ── Creators panel ──
+let vCreatorSortCol = 'totalViews';
+let vCreatorSortDir = -1;
+
+function vRenderCreators() {
+  const map = {};
+  vFiltered.forEach(v => {
+    const c = v.creator||{}; const u = c.username;
+    if (!u) return;
+    if (!map[u]) map[u] = { ...c, totalViews:0, totalLikes:0, totalShares:0, totalSaves:0, videoCount:0, tags:new Set() };
+    map[u].totalViews  += v.stats?.views||0;
+    map[u].totalLikes  += v.stats?.likes||0;
+    map[u].totalShares += v.stats?.shares||0;
+    map[u].totalSaves  += v.stats?.saves||v.stats?.collectCount||0;
+    map[u].videoCount++;
+    (v.hashtags||[]).forEach(t => map[u].tags.add(t));
+  });
+  let rows = Object.values(map).sort((a,b) => vCreatorSortDir * (a[vCreatorSortCol] - b[vCreatorSortCol]));
+  const arrow = dir => dir === -1 ? '↓' : '↑';
+  const th = (col, label) => '<th onclick="vSortCreators(\''+col+'\')" class="'+(vCreatorSortCol===col?'sorted':'')+'">' +
+    label+' <span class="sort-arrow">'+(vCreatorSortCol===col?arrow(vCreatorSortDir):'↕')+'</span></th>';
+  document.getElementById('v-panel-creators').innerHTML =
+    '<div class="creators-table-wrap"><table><thead><tr>' +
+      th('username','Creator')+th('followers','Followers')+th('totalViews','Total Views') +
+      th('totalLikes','Total Likes')+th('totalShares','Total Shares')+th('totalSaves','Total Saves') +
+      th('videoCount','Videos')+'</tr></thead><tbody>' +
+    rows.map(c => {
+      const tags = [...c.tags].slice(0,3).map(t=>'<span style="font-size:0.7rem;color:#c97d8a">#'+vEsc(t)+'</span>').join(' ');
+      const av = c.avatar || '';
+      return '<tr><td><div style="display:flex;align-items:center;gap:10px">' +
+          (av ? '<img src="'+vEsc(av)+'" style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid #f5ece8;flex-shrink:0" onerror="this.style.display=\'none\'" loading="lazy">' : '') +
+          '<div><a href="'+vEsc(c.url)+'" target="_blank">@'+vEsc(c.username)+'</a>' +
+          (c.verified?'<span style="color:#4a9eff;font-size:0.7rem"> ✓</span>':'') +
+          '<div style="margin-top:2px">'+tags+'</div></div></div></td>' +
+        '<td>'+vFmt(c.followers)+'</td><td><b>'+vFmt(c.totalViews)+'</b></td>' +
+        '<td>'+vFmt(c.totalLikes)+'</td><td>'+vFmt(c.totalShares)+'</td>' +
+        '<td>'+vFmt(c.totalSaves)+'</td><td>'+c.videoCount+'</td></tr>';
+    }).join('') + '</tbody></table></div>';
+}
+
+function vSortCreators(col) {
+  if (vCreatorSortCol === col) vCreatorSortDir *= -1;
+  else { vCreatorSortCol = col; vCreatorSortDir = -1; }
+  vRenderCreators();
+}
+
+// ── Top Channels panel ──
+let vTcSortCol = 'avgViews';
+let vTcSortDir = -1;
+
+function vRenderTopChannels() {
+  const map = {};
+  vFiltered.forEach(v => {
+    const c = v.creator||{}; const u = c.username;
+    if (!u) return;
+    if (!map[u]) map[u] = { ...c, totalViews:0, totalLikes:0, totalEng:0, videoCount:0, tags:new Set(), videos:[] };
+    map[u].totalViews += v.stats?.views||0;
+    map[u].totalLikes += v.stats?.likes||0;
+    map[u].totalEng   += v.engagement||0;
+    map[u].videoCount++;
+    map[u].videos.push(v);
+    (v.hashtags||[]).forEach(t => map[u].tags.add(t));
+  });
+  Object.values(map).forEach(c => {
+    c.avgViews = Math.round(c.totalViews / Math.max(c.videoCount, 1));
+    c.avgLikes = Math.round(c.totalLikes / Math.max(c.videoCount, 1));
+    c.engRate  = c.totalViews > 0 ? ((c.totalLikes / c.totalViews) * 100) : 0;
+  });
+  let rows = Object.values(map).filter(c => c.videoCount >= 2);
+  rows.sort((a,b) => vTcSortDir * (a[vTcSortCol] - b[vTcSortCol]));
+  const arrow = dir => dir === -1 ? '↓' : '↑';
+  const th = (col, label) => '<th onclick="vSortTopChannels(\''+col+'\')" class="'+(vTcSortCol===col?'sorted':'')+'">' +
+    label+' <span class="sort-arrow">'+(vTcSortCol===col?arrow(vTcSortDir):'↕')+'</span></th>';
+  if (!rows.length) {
+    document.getElementById('v-panel-topchannels').innerHTML =
+      '<div style="color:#ccc;padding:40px;text-align:center">No channels with 2+ videos found.</div>';
+    return;
+  }
+  document.getElementById('v-panel-topchannels').innerHTML =
+    '<div style="margin-bottom:16px"><span style="font-size:0.85rem;color:#888">Videos 2개 이상인 채널만 표시</span></div>' +
+    '<div class="creators-table-wrap"><table><thead><tr>' +
+      th('username','Channel')+th('avgViews','Avg Views')+th('avgLikes','Avg Likes') +
+      th('engRate','Eng Rate')+th('totalViews','Total Views')+th('followers','Followers') +
+      th('videoCount','Videos')+'</tr></thead><tbody>' +
+    rows.map(c => {
+      const tags = [...c.tags].slice(0,3).map(t=>'<span style="font-size:0.7rem;color:#c97d8a">#'+vEsc(t)+'</span>').join(' ');
+      const av = c.avatar || '';
+      const topVid = c.videos.sort((a,b)=>(b.stats?.views||0)-(a.stats?.views||0))[0];
+      return '<tr><td><div style="display:flex;align-items:center;gap:10px">' +
+          (av ? '<img src="'+vEsc(av)+'" style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid #f5ece8;flex-shrink:0" onerror="this.style.display=\'none\'" loading="lazy">' : '') +
+          '<div><a href="'+vEsc(c.url)+'" target="_blank">@'+vEsc(c.username)+'</a>' +
+          (c.verified?'<span style="color:#4a9eff;font-size:0.7rem"> ✓</span>':'') +
+          '<div style="margin-top:2px">'+tags+'</div></div></div></td>' +
+        '<td style="font-weight:800;color:#c97d8a;font-size:1rem">'+vFmt(c.avgViews)+'</td>' +
+        '<td>'+vFmt(c.avgLikes)+'</td><td>'+c.engRate.toFixed(1)+'%</td>' +
+        '<td>'+vFmt(c.totalViews)+'</td><td>'+vFmt(c.followers)+'</td>' +
+        '<td>'+c.videoCount+(topVid ? ' <a href="'+vEsc(topVid.url)+'" target="_blank" style="font-size:0.7rem;color:#c97d8a;margin-left:4px">top▶</a>' : '')+'</td></tr>';
+    }).join('') + '</tbody></table></div>';
+}
+
+function vSortTopChannels(col) {
+  if (vTcSortCol === col) vTcSortDir *= -1;
+  else { vTcSortCol = col; vTcSortDir = -1; }
+  vRenderTopChannels();
+}
+
+// ── Hashtags panel ──
+const V_BASE_TAGS = new Set(['kbeauty','koreanbeauty','kbeautyroutine','koreanskincare',
+  'glasskin','kbeautytips','koreanmakeup','kbeautyreview','kbeautyskincare','koreanskincaret']);
+
+function vRenderHashtags() {
+  const counts = {}, views = {}, likes = {};
+  vFiltered.forEach(v => {
+    (v.hashtags||[]).forEach(t => {
+      if (!t) return;
+      counts[t] = (counts[t]||0)+1;
+      views[t]  = (views[t]||0) + (v.stats?.views||0);
+      likes[t]  = (likes[t]||0) + (v.stats?.likes||0);
+    });
+  });
+  const sorted = Object.entries(counts).sort((a,b) => (views[b[0]]||0) - (views[a[0]]||0));
+  document.getElementById('v-panel-hashtags').innerHTML =
+    '<div style="margin-bottom:16px"><span style="font-size:0.8rem;color:#888">Click a hashtag to filter videos by it.</span></div>' +
+    '<div class="tags-cloud">' +
+    sorted.map(([tag, count]) =>
+      '<div class="tag-pill" onclick="vFilterByTag(\''+vEsc(tag)+'\')">' +
+         '<div class="tn">#'+vEsc(tag)+'</div>' +
+         '<div class="ts">'+count+' videos · '+vFmt(views[tag])+' views</div></div>'
+    ).join('') + '</div>';
+}
+
+// ── Audio panel ──
+function vRenderAudio() {
+  const map = {};
+  vFiltered.forEach(v => {
+    const m = v.music||{};
+    if (!m.title || m.original) return;
+    const key = m.title + ' — ' + (m.artist||'Unknown');
+    if (!map[key]) map[key] = { count:0, views:0, likes:0 };
+    map[key].count++;
+    map[key].views += v.stats?.views||0;
+    map[key].likes += v.stats?.likes||0;
+  });
+  const sorted = Object.entries(map).sort((a,b) => b[1].views - a[1].views);
+  if (!sorted.length) {
+    document.getElementById('v-panel-audio').innerHTML =
+      '<div class="empty"><div class="icon">🎵</div><p>No audio data in current filter.</p></div>';
+    return;
+  }
+  document.getElementById('v-panel-audio').innerHTML =
+    '<div class="audio-table"><table><thead><tr>' +
+      '<th>#</th><th>Track</th><th>Used in</th><th>Total Views</th><th>Total Likes</th>' +
+    '</tr></thead><tbody>' +
+    sorted.map(([track, d], i) =>
+      '<tr><td style="color:#ddd;font-weight:700">'+(i+1)+'</td>' +
+       '<td><b>'+vEsc(track)+'</b></td>' +
+       '<td>'+d.count+' videos</td>' +
+       '<td>'+vFmt(d.views)+'</td>' +
+       '<td>'+vFmt(d.likes)+'</td></tr>'
+    ).join('') + '</tbody></table></div>';
+}
+
+// ── Scrape trigger ──
+async function vTriggerScrape() {
+  const btn = document.getElementById('v-run-btn');
+  btn.disabled = true; btn.textContent = 'Running...';
+  const endpoint = vPlatform === 'twitter' ? '/api/run/twitter' : '/api/run';
+  vToast('Scrape started — takes ~5-10 min. Page will refresh when done.', 10000);
+  const r = await fetch(endpoint, { method: 'POST' });
+  await r.json();
+  const poll = setInterval(async () => {
+    if (vPlatform === 'tiktok') {
+      const dr = await fetch('/api/dates');
+      const dates = await dr.json();
+      if (dates[0] !== vAllDates[0]) {
+        clearInterval(poll);
+        btn.disabled = false; btn.textContent = 'Run New Scrape';
+        vAllDates = dates; await vLoadAllData(); vToast('New TikTok data loaded!', 4000);
+      }
+    } else {
+      const dr = await fetch('/api/x/dates');
+      const dates = await dr.json();
+      if (dates[0] !== vxAllDates[0]) {
+        clearInterval(poll);
+        btn.disabled = false; btn.textContent = 'Run New Scrape';
+        vxAllDates = dates; await vLoadXAllData(); vToast('New Twitter data loaded!', 4000);
+      }
+    }
+  }, 30000);
+}
+
+// ── Platform switcher ──
+function vSwitchPlatform(p) {
+  vPlatform = p;
+  const hdr = document.getElementById('vh-subheader');
+  const tiktokHub = document.getElementById('v-tiktok-layout');
+  const twitterHub = document.getElementById('v-twitter-hub');
+  document.getElementById('btn-tiktok').classList.toggle('active', p === 'tiktok');
+  document.getElementById('btn-twitter').classList.toggle('active', p === 'twitter');
+  if (p === 'tiktok') {
+    hdr.className = 'vh-subheader tiktok';
+    document.getElementById('vh-hub-title').textContent = 'K-Beauty TikTok Hub';
+    tiktokHub.style.display = 'flex';
+    twitterHub.style.display = 'none';
+    document.getElementById('v-run-btn').textContent = 'Run New Scrape';
+  } else {
+    hdr.className = 'vh-subheader twitter';
+    document.getElementById('vh-hub-title').textContent = 'K-Beauty X (Twitter) Hub';
+    tiktokHub.style.display = 'none';
+    twitterHub.style.display = 'block';
+    document.getElementById('v-run-btn').textContent = 'Run New Scrape';
+    if (!vxAllDates.length) vInitTwitter();
+  }
+}
+
+// ── Twitter init & data ──
+async function vInitTwitter() {
+  const r = await fetch('/api/x/dates');
+  vxAllDates = await r.json();
+  const sel = document.getElementById('vx-date-pick');
+  sel.innerHTML = '';
+  vxAllDates.forEach(d => {
+    const o = document.createElement('option');
+    o.value = d; o.textContent = d; sel.appendChild(o);
+  });
+  if (vxAllDates.length) {
+    await vLoadXAllData();
+  } else {
+    document.getElementById('vh-last-updated').textContent = 'No Twitter data yet — click Run New Scrape';
+    document.getElementById('vx-panel-tweets').innerHTML =
+      '<div class="empty"><div class="icon">𝕏</div><p>No Twitter data yet.</p><p style="margin-top:8px">Click <b>Run New Scrape</b> to pull K-beauty tweets.</p></div>';
+  }
+}
+
+async function vLoadXAllData() {
+  vxAllData = [];
+  const seen = new Set();
+  for (const date of vxAllDates) {
+    const r = await fetch('/api/x/data/' + date);
+    const items = await r.json();
+    items.forEach(t => {
+      if (!seen.has(t.id)) { seen.add(t.id); vxAllData.push({...t, _dataset: date}); }
+    });
+  }
+  document.getElementById('vh-last-updated').textContent =
+    vxAllData.length + ' tweets across ' + vxAllDates.length + ' dataset(s) · Latest: ' + (vxAllDates[0]||'—');
+  vApplyXFilters();
+}
+
+async function vLoadXDate(date) { vApplyXFilters(); }
+
+function vSetXDateRange(val, btn) {
+  vxDateRange = val;
+  document.querySelectorAll('#v-twitter-hub .date-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+const V_KBEAUTY_KEYWORDS = new Set([
+  'kbeauty','k-beauty','koreanbeauty','korean beauty','koreanskincare','korean skincare',
+  'glasskin','glass skin','koreanmakeup','korean makeup','kbeautyroutine','skincare routine',
+  'sunscreen','toner','ampoule','essence','serum','snail','cica','centella','niacinamide',
+  'ceramide','hyaluronic','retinol','gua sha','sheet mask','pore','brightening','whitening',
+  'cosrx','laneige','innisfree','etude','missha','some by mi','skin1004','anua','isntree',
+  'beauty of joseon','round lab','torriden','dr jart','klavuu','rom&nd','peripera',
+  'sulwhasoo','hera','espoir','3ce','nacific','apieu','tocobo','goodal'
+]);
+
+function vIsKbeautyRelevant(t) {
+  const text = (t.text||'').toLowerCase();
+  const tags = (t.hashtags||[]).map(h => h.toLowerCase());
+  for (const kw of V_KBEAUTY_KEYWORDS) { if (text.includes(kw)) return true; }
+  for (const tag of tags) { if (V_KBEAUTY_KEYWORDS.has(tag)) return true; }
+  return false;
+}
+
+function vApplyXFilters() {
+  const author   = document.getElementById('vxf-author').value.trim().toLowerCase();
+  const hashtag  = document.getElementById('vxf-hashtag').value.trim().toLowerCase().replace('#','');
+  const keyword  = document.getElementById('vxf-keyword').value.trim().toLowerCase();
+  const viewsMin = parseInt(document.getElementById('vxf-views-min').value) || 0;
+  const rtMin    = parseInt(document.getElementById('vxf-rt-min').value) || 0;
+  const dataset  = document.getElementById('vx-date-pick').value;
+  const now = Date.now(); const dayMs = 86400000;
+  const cutoff = vxDateRange === 'all' ? 0 : now - (vxDateRange * dayMs);
+  vxFiltered = vxAllData.filter(t => {
+    if (!vIsKbeautyRelevant(t)) return false;
+    if (vxDateRange !== 'all' && t.created_at) {
+      if (new Date(t.created_at).getTime() < cutoff) return false;
+    }
+    if (author  && !(t.author?.username||'').toLowerCase().includes(author)) return false;
+    if (hashtag && !(t.hashtags||[]).some(h => h.toLowerCase().includes(hashtag))) return false;
+    if (keyword && !(t.text||'').toLowerCase().includes(keyword)) return false;
+    if ((t.views    ||0) < viewsMin) return false;
+    if ((t.retweets ||0) < rtMin)    return false;
+    if (dataset && dataset !== 'all' && t._dataset !== dataset) return false;
+    return true;
+  });
+  vUpdateXStats();
+  vRenderXActiveTab();
+}
+
+function vClearXFilters() {
+  ['vxf-author','vxf-hashtag','vxf-keyword','vxf-views-min','vxf-rt-min'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+  vxDateRange = 'all';
+  document.querySelectorAll('#v-twitter-hub .date-btn').forEach(b => b.classList.remove('active'));
+  document.querySelector('#v-twitter-hub .date-btn').classList.add('active');
+  vApplyXFilters();
+}
+
+function vUpdateXStats() {
+  const totalViews = vxFiltered.reduce((s,t) => s+(t.views||0), 0);
+  const totalLikes = vxFiltered.reduce((s,t) => s+(t.likes||0), 0);
+  const accounts   = new Set(vxFiltered.map(t => t.author?.username)).size;
+  document.getElementById('vxs-tweets').textContent   = vFmt(vxFiltered.length);
+  document.getElementById('vxs-views').textContent    = vFmt(totalViews);
+  document.getElementById('vxs-likes').textContent    = vFmt(totalLikes);
+  document.getElementById('vxs-accounts').textContent = accounts;
+  document.getElementById('vx-result-count').textContent = vxFiltered.length + ' tweets';
+}
+
+function vSwitchXTab(tab, btn) {
+  vxActiveTab = tab;
+  document.querySelectorAll('#vx-tabs .tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  vRenderXActiveTab();
+}
+
+function vRenderXActiveTab() {
+  if (vxActiveTab === 'tweets')    vRenderTweets();
+  if (vxActiveTab === 'xcreators') vRenderXCreators();
+  if (vxActiveTab === 'xhashtags') vRenderXHashtags();
+  ['tweets','xcreators','xhashtags'].forEach(t => {
+    document.getElementById('vx-panel-' + t).style.display = t === vxActiveTab ? 'block' : 'none';
+  });
+}
+
+function vRenderTweets() {
+  const sortBy = document.getElementById('vx-sort-select').value;
+  const sorted = [...vxFiltered].sort((a,b) => {
+    if (sortBy === 'date') return new Date(b.created_at||0) - new Date(a.created_at||0);
+    return (b[sortBy]||0) - (a[sortBy]||0);
+  });
+  if (!sorted.length) {
+    document.getElementById('vx-panel-tweets').innerHTML =
+      '<div class="empty"><div class="icon">𝕏</div><p>No tweets match your filters.</p></div>';
+    return;
+  }
+  document.getElementById('vx-panel-tweets').innerHTML =
+    '<div class="tweet-grid">' +
+    sorted.map((t, i) => {
+      const a = t.author || {};
+      const tags = (t.hashtags||[]).slice(0,5).map(h =>
+        '<span class="tweet-tag" onclick="vFilterXByTag(\''+vEsc(h)+'\')">#'+vEsc(h)+'</span>').join('');
+      const img = t.media_url
+        ? '<img class="tweet-img" src="'+vEsc(t.media_url)+'" loading="lazy" onerror="this.style.display=\'none\'">'
+        : '';
+      const date = t.created_at ? new Date(t.created_at).toLocaleDateString() : '';
+      return '<div class="tweet-card"><div class="tweet-author">' +
+          (a.avatar ? '<img class="tweet-avatar" src="'+vEsc(a.avatar)+'" loading="lazy" onerror="this.style.display=\'none\'">' : '<div class="tweet-avatar" style="display:flex;align-items:center;justify-content:center;font-size:18px">𝕏</div>') +
+          '<div><div class="tweet-name">'+vEsc(a.name||a.username)+(a.verified ? '<span class="x-verified">✓</span>' : '')+'</div>' +
+          '<div class="tweet-handle">@'+vEsc(a.username)+' · '+vFmt(a.followers)+' followers · '+date+'</div></div>' +
+          '<span style="margin-left:auto;font-size:0.72rem;color:#ddd;font-weight:700">#'+(i+1)+'</span></div>' +
+        '<div class="tweet-text">'+vEsc(t.text||'')+'</div>'+img+
+        '<div class="tweet-metrics">' +
+          '<div class="tweet-metric"><div class="mv">'+vFmt(t.views)+'</div><div class="ml">Views</div></div>' +
+          '<div class="tweet-metric"><div class="mv">'+vFmt(t.likes)+'</div><div class="ml">Likes</div></div>' +
+          '<div class="tweet-metric"><div class="mv">'+vFmt(t.retweets)+'</div><div class="ml">Retweets</div></div>' +
+          '<div class="tweet-metric"><div class="mv">'+vFmt(t.replies)+'</div><div class="ml">Replies</div></div></div>' +
+        '<div class="tweet-tags">'+tags+'</div>' +
+        '<div class="tweet-footer"><span>via #'+vEsc(t.source_tag||'')+' · '+vEsc(t._dataset||'')+'</span>' +
+          '<a class="tweet-link" href="'+vEsc(t.url)+'" target="_blank">View on X →</a></div></div>';
+    }).join('') + '</div>';
+}
+
+function vFilterXByTag(tag) {
+  document.getElementById('vxf-hashtag').value = tag;
+  vApplyXFilters();
+  vToast('Filtered by #'+tag);
+}
+
+function vRenderXCreators() {
+  const map = {};
+  vxFiltered.forEach(t => {
+    const a = t.author||{}; const u = a.username;
+    if (!u) return;
+    if (!map[u]) map[u] = { ...a, totalViews:0, totalLikes:0, totalRt:0, tweetCount:0, tags:new Set() };
+    map[u].totalViews += t.views||0;
+    map[u].totalLikes += t.likes||0;
+    map[u].totalRt    += t.retweets||0;
+    map[u].tweetCount++;
+    (t.hashtags||[]).forEach(h => map[u].tags.add(h));
+  });
+  const rows = Object.values(map).sort((a,b) => b.totalViews - a.totalViews);
+  document.getElementById('vx-panel-xcreators').innerHTML =
+    '<div class="creators-table-wrap"><table><thead><tr>' +
+      '<th>Account</th><th>Followers</th><th>Total Views</th>' +
+      '<th>Total Likes</th><th>Retweets</th><th>Tweets</th>' +
+    '</tr></thead><tbody>' +
+    rows.map(a => {
+      const av = a.avatar || '';
+      const tags = [...a.tags].slice(0,3).map(t=>'<span style="font-size:0.7rem;color:#1d9bf0">#'+vEsc(t)+'</span>').join(' ');
+      return '<tr><td><div style="display:flex;align-items:center;gap:10px">' +
+        (av ? '<img src="'+vEsc(av)+'" style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid #e8f4ff;flex-shrink:0" onerror="this.style.display=\'none\'" loading="lazy">' : '') +
+        '<div><a href="https://x.com/'+vEsc(a.username)+'" target="_blank" style="color:#1d9bf0">@'+vEsc(a.username)+'</a>' +
+        (a.verified?'<span style="color:#1d9bf0;font-size:0.7rem"> ✓</span>':'') +
+        '<div style="margin-top:2px">'+tags+'</div></div></div></td>' +
+        '<td>'+vFmt(a.followers)+'</td><td><b>'+vFmt(a.totalViews)+'</b></td>' +
+        '<td>'+vFmt(a.totalLikes)+'</td><td>'+vFmt(a.totalRt)+'</td>' +
+        '<td>'+a.tweetCount+'</td></tr>';
+    }).join('') + '</tbody></table></div>';
+}
+
+function vRenderXHashtags() {
+  const counts={}, views={};
+  vxFiltered.forEach(t => {
+    (t.hashtags||[]).forEach(h => {
+      if (!h) return;
+      counts[h] = (counts[h]||0)+1;
+      views[h]  = (views[h]||0)+(t.views||0);
+    });
+  });
+  const sorted = Object.entries(counts).sort((a,b) => (views[b[0]]||0)-(views[a[0]]||0));
+  document.getElementById('vx-panel-xhashtags').innerHTML =
+    '<div style="margin-bottom:16px"><span style="font-size:0.8rem;color:#888">Click to filter.</span></div>' +
+    '<div class="tags-cloud">' +
+    sorted.map(([tag,count]) =>
+      '<div class="tag-pill" onclick="vFilterXByTag(\''+vEsc(tag)+'\')" style="border-color:#e8f4ff">' +
+         '<div class="tn" style="color:#1d9bf0">#'+vEsc(tag)+'</div>' +
+         '<div class="ts">'+count+' tweets · '+vFmt(views[tag])+' views</div></div>'
+    ).join('') + '</div>';
+}
+
+// ── Video hover preview ──
+let vPreviewTimer = null;
+let vPreviewActive = false;
+
+function vExtractVideoId(url) {
+  const m = url.match(/video\/(\d+)/);
+  return m ? m[1] : null;
+}
+
+function vShowVideoPreview(el, e) {
+  const url = el.dataset.videoUrl;
+  if (!url) return;
+  const videoId = vExtractVideoId(url);
+  if (!videoId) return;
+  const previewEl = document.getElementById('vVideoPreview');
+  vPreviewTimer = setTimeout(() => {
+    previewEl.innerHTML = '<iframe src="https://www.tiktok.com/player/v1/'+videoId+'?autoplay=1&mute=1&loop=1&controls=0" allow="autoplay; encrypted-media" loading="lazy"></iframe>';
+    vPositionPreview(e);
+    previewEl.classList.add('active');
+    vPreviewActive = true;
+  }, 400);
+}
+
+function vMoveVideoPreview(e) {
+  if (vPreviewActive) vPositionPreview(e);
+}
+
+function vPositionPreview(e) {
+  const previewEl = document.getElementById('vVideoPreview');
+  const pw = 340, ph = 580;
+  let x = e.clientX + 20;
+  let y = e.clientY - ph / 2;
+  if (x + pw > window.innerWidth) x = e.clientX - pw - 20;
+  if (y < 10) y = 10;
+  if (y + ph > window.innerHeight - 10) y = window.innerHeight - ph - 10;
+  previewEl.style.left = x + 'px';
+  previewEl.style.top = y + 'px';
+}
+
+function vHideVideoPreview() {
+  clearTimeout(vPreviewTimer);
+  const previewEl = document.getElementById('vVideoPreview');
+  previewEl.classList.remove('active');
+  previewEl.innerHTML = '';
+  vPreviewActive = false;
+}
 </script>
 </body>
 </html>
