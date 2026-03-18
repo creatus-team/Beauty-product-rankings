@@ -1400,56 +1400,43 @@ select.fs:focus{border-color:var(--pink);background:#fff}
   <div class="v-layout">
     <aside class="v-sidebar" style="border-right-color:#ffd0d5">
       <div class="filter-section">
-        <span class="filter-label" style="color:#ff2442">Date Range</span>
-        <div class="date-btns">
-          <button class="date-btn active" onclick="vSetXhsDateRange('all', this)">All Time</button>
-          <button class="date-btn" onclick="vSetXhsDateRange(1, this)">Today</button>
-          <button class="date-btn" onclick="vSetXhsDateRange(7, this)">7 Days</button>
-          <button class="date-btn" onclick="vSetXhsDateRange(30, this)">30 Days</button>
+        <span class="filter-label" style="color:#ff2442">카테고리</span>
+        <div class="date-btns" style="flex-direction:column;gap:5px">
+          <button class="date-btn active" data-cat="All" onclick="setXhsCat(this)">🌸 전체 K-Beauty</button>
+          <button class="date-btn" data-cat="스킨케어" onclick="setXhsCat(this)">💧 스킨케어</button>
+          <button class="date-btn" data-cat="메이크업" onclick="setXhsCat(this)">💄 메이크업</button>
+          <button class="date-btn" data-cat="헤어케어" onclick="setXhsCat(this)">💆 헤어케어</button>
+          <button class="date-btn" data-cat="종합" onclick="setXhsCat(this)">✨ 종합/바이럴</button>
         </div>
       </div>
       <hr class="divider">
       <div class="filter-section">
-        <span class="filter-label" style="color:#ff2442">Search</span>
+        <span class="filter-label" style="color:#ff2442">검색</span>
         <div class="filter-group">
-          <input type="text" id="xhsf-creator" placeholder="Creator username...">
-          <input type="text" id="xhsf-keyword" placeholder="Title keyword...">
+          <input type="text" id="xhsf-creator" placeholder="크리에이터 이름..." oninput="vApplyXhsFilters()">
+          <input type="text" id="xhsf-keyword" placeholder="제목 키워드..." oninput="vApplyXhsFilters()">
         </div>
       </div>
       <hr class="divider">
       <div class="filter-section">
-        <span class="filter-label" style="color:#ff2442">Type</span>
+        <span class="filter-label" style="color:#ff2442">콘텐츠 타입</span>
         <select id="xhsf-type" onchange="vApplyXhsFilters()">
-          <option value="">All Types</option>
-          <option value="video">Video</option>
-          <option value="image">Image / Note</option>
+          <option value="">🌐 전체</option>
+          <option value="video">🎬 영상</option>
+          <option value="image">📷 이미지 노트</option>
         </select>
       </div>
       <hr class="divider">
       <div class="filter-section">
-        <span class="filter-label" style="color:#ff2442">Sort By</span>
+        <span class="filter-label" style="color:#ff2442">정렬</span>
         <select id="xhs-sort-select" onchange="vRenderXhsPosts()">
-          <option value="likes">Likes</option>
-          <option value="date">Date (Newest)</option>
+          <option value="likes">❤️ 좋아요순</option>
+          <option value="comments">💬 댓글순</option>
         </select>
       </div>
-      <button class="apply-btn" style="background:#ff2442" onclick="vApplyXhsFilters()">Apply Filters</button>
-      <button class="clear-btn" onclick="vClearXhsFilters()">Clear All</button>
+      <button class="clear-btn" onclick="vClearXhsFilters()">필터 초기화</button>
     </aside>
     <main class="v-main">
-      <div class="ys-pills" id="xhsCatPills" style="margin-bottom:10px">
-        <button class="ys-pill active" data-cat="All" onclick="setXhsCat(this)">전체</button>
-        <button class="ys-pill" data-cat="스킨케어" onclick="setXhsCat(this)">스킨케어</button>
-        <button class="ys-pill" data-cat="메이크업" onclick="setXhsCat(this)">메이크업</button>
-        <button class="ys-pill" data-cat="헤어케어" onclick="setXhsCat(this)">헤어케어</button>
-        <button class="ys-pill" data-cat="종합" onclick="setXhsCat(this)">종합/바이럴</button>
-      </div>
-      <div class="ys-pills" id="xhsPeriodPills" style="margin-bottom:14px">
-        <span style="font-size:.75rem;font-weight:700;color:var(--muted);margin-right:2px">기간:</span>
-        <button class="ys-pill active" data-period="all" onclick="setXhsPeriod(this)">전체</button>
-        <button class="ys-pill" data-period="30" onclick="setXhsPeriod(this)">최근 30일</button>
-        <button class="ys-pill" data-period="7" onclick="setXhsPeriod(this)">최근 7일</button>
-      </div>
       <div class="stats-bar" id="xhs-stats-bar">
         <div class="stat-chip"><div class="n" id="xhss-posts" style="color:#ff2442">—</div><div class="l">Posts</div></div>
         <div class="stat-chip"><div class="n" id="xhss-likes" style="color:#ff2442">—</div><div class="l">Total Likes</div></div>
@@ -1461,8 +1448,10 @@ select.fs:focus{border-color:var(--pink);background:#fff}
         <button class="tab" style="--ac:#ff2442" onclick="vSwitchXhsTab('creators', this)">👤 Top Creators</button>
       </div>
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;background:white;padding:10px 16px;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.05)">
-        <span style="font-size:0.8rem;color:#888">Dataset:</span>
-        <select id="xhs-date-pick" style="width:auto;flex:1;padding:6px 10px;font-size:0.82rem"></select>
+        <span style="font-size:0.8rem;color:#888">데이터셋:</span>
+        <select id="xhs-date-pick" onchange="vApplyXhsFilters()" style="width:auto;flex:1;padding:6px 10px;font-size:0.82rem">
+          <option value="">— 전체 데이터셋 —</option>
+        </select>
         <div id="xhs-result-count" style="margin-left:auto;font-size:0.8rem;color:#aaa"></div>
       </div>
       <div id="xhs-panel-posts"></div>
@@ -3367,7 +3356,8 @@ async function vInitXhs() {
   const r = await fetch('/api/xhs/dates');
   vxhsAllDates = await r.json();
   const sel = document.getElementById('xhs-date-pick');
-  sel.innerHTML = '';
+  // keep "전체 데이터셋" option, append dates
+  sel.innerHTML = '<option value="">— 전체 데이터셋 —</option>';
   vxhsAllDates.forEach(d => {
     const o = document.createElement('option');
     o.value = d; o.textContent = d; sel.appendChild(o);
@@ -3398,22 +3388,9 @@ async function vLoadXhsAllData() {
 
 function setXhsCat(btn) {
   xhsCat = btn.dataset.cat;
-  document.querySelectorAll('#xhsCatPills .ys-pill').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('#v-xhs-hub [data-cat]').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   vApplyXhsFilters();
-}
-
-function setXhsPeriod(btn) {
-  xhsPeriod = btn.dataset.period;
-  document.querySelectorAll('#xhsPeriodPills .ys-pill').forEach(p => p.classList.remove('active'));
-  btn.classList.add('active');
-  vApplyXhsFilters();
-}
-
-function vSetXhsDateRange(val, btn) {
-  vxhsDateRange = val;
-  document.querySelectorAll('#v-xhs-hub .date-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
 }
 
 function vApplyXhsFilters() {
@@ -3421,17 +3398,12 @@ function vApplyXhsFilters() {
   const keyword = document.getElementById('xhsf-keyword').value.trim().toLowerCase();
   const type    = document.getElementById('xhsf-type').value;
   const dataset = document.getElementById('xhs-date-pick').value;
-  const now = Date.now(); const dayMs = 86400000;
-  // period pills 우선, 없으면 사이드바 date range
-  const periodDays = xhsPeriod !== 'all' ? parseInt(xhsPeriod) : (vxhsDateRange !== 'all' ? vxhsDateRange : 0);
-  const cutoff = periodDays ? now - (periodDays * dayMs) : 0;
   vxhsFiltered = vxhsAllData.filter(p => {
     if (dataset && p._dataset !== dataset) return false;
     if (xhsCat !== 'All' && p.category !== xhsCat) return false;
     if (type && p.type !== type) return false;
     if (creator && !(p.creator?.username||'').toLowerCase().includes(creator)) return false;
     if (keyword && !(p.title||'').toLowerCase().includes(keyword)) return false;
-    if (cutoff && p.created_at && new Date(p.created_at).getTime() < cutoff) return false;
     return true;
   });
   vUpdateXhsStats();
@@ -3441,13 +3413,11 @@ function vApplyXhsFilters() {
 function vClearXhsFilters() {
   ['xhsf-creator','xhsf-keyword'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('xhsf-type').value = '';
-  vxhsDateRange = 'all'; xhsCat = 'All'; xhsPeriod = 'all';
-  document.querySelectorAll('#v-xhs-hub .date-btn').forEach(b => b.classList.remove('active'));
-  document.querySelector('#v-xhs-hub .date-btn').classList.add('active');
-  document.querySelectorAll('#xhsCatPills .ys-pill').forEach(p => p.classList.remove('active'));
-  document.querySelector('#xhsCatPills .ys-pill').classList.add('active');
-  document.querySelectorAll('#xhsPeriodPills .ys-pill').forEach(p => p.classList.remove('active'));
-  document.querySelector('#xhsPeriodPills .ys-pill').classList.add('active');
+  document.getElementById('xhs-date-pick').value = '';
+  xhsCat = 'All';
+  document.querySelectorAll('#v-xhs-hub [data-cat]').forEach(b => b.classList.remove('active'));
+  const allBtn = document.querySelector('#v-xhs-hub [data-cat="All"]');
+  if (allBtn) allBtn.classList.add('active');
   vApplyXhsFilters();
 }
 
@@ -3479,39 +3449,47 @@ function vRenderXhsActiveTab() {
 function vRenderXhsPosts() {
   const el = document.getElementById('xhs-panel-posts');
   if (!vxhsFiltered.length) {
-    el.innerHTML = '<div class="empty"><div class="icon">📕</div><p>No posts match your filters.</p></div>';
+    el.innerHTML = '<div class="empty"><div class="icon">📕</div><p>필터에 맞는 포스트가 없어요.</p></div>';
     return;
   }
   const sortBy = document.getElementById('xhs-sort-select').value;
   const sorted = [...vxhsFiltered].sort((a, b) => {
-    if (sortBy === 'likes') return (parseInt(b.stats?.likes)||0) - (parseInt(a.stats?.likes)||0);
-    return new Date(b.created_at||0) - new Date(a.created_at||0);
+    if (sortBy === 'comments') return (parseInt(b.stats?.comments)||0) - (parseInt(a.stats?.comments)||0);
+    return (parseInt(b.stats?.likes)||0) - (parseInt(a.stats?.likes)||0);
   });
-  el.innerHTML = '<div class="v-cards">' + sorted.slice(0, 60).map(p => {
-    const likes   = vFmt(parseInt(p.stats?.likes)||0);
-    const cover   = p.cover || '';
-    const creator = p.creator?.username || p.creator?.nickName || '—';
-    const avatar  = p.creator?.avatar || '';
+  const catColor = {'스킨케어':'#4caf9e','메이크업':'#e91e8c','헤어케어':'#9c5bb5','종합':'#ff7043'};
+  el.innerHTML = '<div class="video-grid">' + sorted.slice(0, 60).map((p, i) => {
+    const likes    = vFmt(parseInt(p.stats?.likes)||0);
+    const comments = vFmt(parseInt(p.stats?.comments)||0);
+    const cover    = p.cover || '';
+    const creator  = p.creator?.username || '—';
+    const avatar   = p.creator?.avatar || '';
     const typeIcon = p.type === 'video' ? '🎬' : '📷';
-    const date    = p.created_at ? new Date(p.created_at).toLocaleDateString('ko-KR') : '';
-    return `<div class="v-card">
-      ${cover ? `<a href="${vEsc(p.url||'#')}" target="_blank" class="card-thumb">
-        <img src="${vEsc(cover)}" loading="lazy" onerror="this.parentElement.style.display='none'">
-        <div class="thumb-overlay"></div>
-        <div class="thumb-views" style="background:rgba(255,36,66,.7)">${typeIcon} ${likes} ❤️</div>
-      </a>` : ''}
-      <div class="v-card-body">
-        <div class="v-caption" title="${vEsc(p.title||'')}">
-          <a href="${vEsc(p.url||'#')}" target="_blank" style="color:inherit;text-decoration:none">${vEsc((p.title||'').slice(0,80))}</a>
-        </div>
-        <div class="v-meta">
-          ${avatar ? `<img src="${vEsc(avatar)}" style="width:18px;height:18px;border-radius:50%;object-fit:cover">` : ''}
-          <span style="font-weight:600;font-size:0.8rem">${vEsc(creator)}</span>
-          <span style="margin-left:auto;color:#ff2442;font-weight:700;font-size:0.82rem">❤️ ${likes}</span>
-        </div>
-        ${date ? `<div style="font-size:0.72rem;color:#aaa;margin-top:4px">${date}</div>` : ''}
-      </div>
-    </div>`;
+    const catBadge = p.category
+      ? '<span style="background:' + (catColor[p.category]||'#999') + ';color:white;font-size:0.65rem;padding:2px 7px;border-radius:10px;font-weight:700">' + vEsc(p.category) + '</span>'
+      : '';
+    const kwBadge = p.source_tag
+      ? '<span style="background:#f3e5ff;color:#9c5bb5;font-size:0.65rem;padding:2px 7px;border-radius:10px">#' + vEsc(p.source_tag) + '</span>'
+      : '';
+    return '<div class="video-card">' +
+      (cover
+        ? '<a href="' + vEsc(p.url||'#') + '" target="_blank" class="card-thumb"><img src="' + vEsc(cover) + '" loading="lazy" onerror="this.parentElement.style.display=\'none\'"><div class="thumb-overlay"></div><div class="thumb-views" style="background:rgba(255,36,66,.75)">' + typeIcon + ' ' + likes + ' ❤️</div></a>'
+        : '') +
+      '<div class="card-body">' +
+        '<div class="card-rank">#' + (i+1) + ' · ' + vEsc(p.source_tag||'xhs') + '</div>' +
+        '<div class="card-creator">' +
+          (avatar
+            ? '<img class="creator-avatar" src="' + vEsc(avatar) + '" onerror="this.style.display=\'none\'" loading="lazy">'
+            : '<div class="creator-avatar" style="display:flex;align-items:center;justify-content:center;font-size:14px;color:#ddd">👤</div>') +
+          '<div class="creator-info"><span style="font-weight:700">' + vEsc(creator) + '</span></div></div>' +
+        '<div class="card-caption">' + vEsc((p.title||'').slice(0, 100)) + '</div>' +
+        '<div class="metrics-grid">' +
+          '<div class="metric"><div class="mv" style="color:#ff2442">' + likes + '</div><div class="ml">좋아요</div></div>' +
+          '<div class="metric"><div class="mv">' + comments + '</div><div class="ml">댓글</div></div>' +
+        '</div>' +
+        '<div class="tags-row" style="gap:4px;margin-top:6px">' + catBadge + ' ' + kwBadge + '</div>' +
+        '<div class="card-footer"><a class="watch-btn" href="' + vEsc(p.url||'#') + '" target="_blank" style="background:#ff2442">小红书에서 보기 →</a></div>' +
+      '</div></div>';
   }).join('') + '</div>';
 }
 
