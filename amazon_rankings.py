@@ -448,8 +448,16 @@ def fetch_from_apify(refresh=False):
     oy_items = fetch_oliveyoung()
     print(f"[OliveYoung] fetched {len(oy_items)} items")
     all_items.extend(oy_items)
-    # Qoo10 Japan 추가
+    # Qoo10 Japan 추가 (Playwright 필요 — Vercel에서는 번들 캐시 폴백)
     qj_items = fetch_qoo10()
+    if not qj_items and os.path.exists(BUNDLED_CACHE):
+        try:
+            with open(BUNDLED_CACHE, "r", encoding="utf-8") as f:
+                bundled = json.load(f)
+            qj_items = [i for i in bundled.get("items", []) if i.get("_country_code") == "QJ"]
+            print(f"[Qoo10] Playwright unavailable — loaded {len(qj_items)} items from bundled cache")
+        except Exception:
+            pass
     print(f"[Qoo10] fetched {len(qj_items)} items")
     all_items.extend(qj_items)
     # TikTok Shop 추가
@@ -718,7 +726,8 @@ select.fs:focus{border-color:var(--pink);background:#fff}
 .dash-mini-item:hover .dash-mini-thumb img{transform:scale(1.04)}
 .dash-mini-ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:2rem;color:var(--pink-mid)}
 .dash-mini-rank{position:absolute;top:7px;left:7px;font-size:.68rem;font-weight:900;color:#fff;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.25);z-index:2}
-.dash-mini-name{padding:8px 10px 10px;font-size:.76rem;font-weight:700;line-height:1.4;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;color:var(--text)}
+.dash-mini-name{padding:8px 10px 4px;font-size:.76rem;font-weight:700;line-height:1.4;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;color:var(--text)}
+.dash-mini-price{padding:0 10px 8px;font-size:.72rem;font-weight:800;color:var(--pink)}
 .db-chart-card{background:var(--surface);border-radius:14px;border:1px solid var(--border);box-shadow:var(--shadow);padding:14px 16px;flex-shrink:0;cursor:pointer;transition:transform .18s,box-shadow .18s,border-color .18s}
 .db-chart-card:hover{transform:translateY(-3px);box-shadow:0 8px 24px rgba(211,61,90,.18);border-color:var(--pink)}
 .db-card-title{font-size:.82rem;font-weight:800;color:var(--pink);margin-bottom:10px}
@@ -1134,7 +1143,7 @@ select.fs:focus{border-color:var(--pink);background:#fff}
   <div class="header-right">
     <div class="platform-switch">
       <button class="plat-btn tiktok-btn active" id="btn-tiktok" onclick="vSwitchPlatform('tiktok')">🎵 TikTok</button>
-      <button class="plat-btn twitter-btn" id="btn-twitter" onclick="vSwitchPlatform('twitter')">𝕏 Twitter</button>
+      <button class="plat-btn twitter-btn" id="btn-twitter" onclick="vSwitchPlatform('twitter')">🇯🇵 JP Twitter</button>
       <button class="plat-btn xhs-btn" id="btn-xhs" onclick="vSwitchPlatform('xhs')">📕 小红书</button>
     </div>
     <button class="run-btn" id="v-run-btn" onclick="vTriggerScrape()">Run New Scrape</button>
@@ -1595,6 +1604,13 @@ function getFiltered() {
   return items;
 }
 
+function toUSD(val, currency) {
+  if (!val || isNaN(val)) return '';
+  if (currency === '¥') return '$' + (val / 150).toFixed(2);
+  if (currency === '£') return '$' + (val * 1.27).toFixed(2);
+  return '';
+}
+
 function renderDashboard() {
   const platforms = [
     {code:'US', label:'Amazon US'},
@@ -1617,12 +1633,23 @@ function renderDashboard() {
       const th=item.thumbnailUrl;
       const imgEl=th?`<img src="${th}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`:'' ;
       const phEl=`<div class="dash-mini-ph" style="${th?'display:none':''}">🧴</div>`;
+      const rawPrice = item._price_value;
+      const cur = item._price_currency || '';
+      let priceDisplay = '';
+      if (rawPrice) {
+        if (cur === '¥') priceDisplay = `¥${rawPrice.toLocaleString()} (${toUSD(rawPrice, cur)})`;
+        else if (cur === '£') priceDisplay = `£${rawPrice.toFixed(2)} (${toUSD(rawPrice, cur)})`;
+        else if (cur === '$') priceDisplay = `$${rawPrice.toFixed(2)}`;
+        else if (cur === '₩') priceDisplay = `₩${Math.round(rawPrice).toLocaleString()}`;
+        else priceDisplay = `${cur}${rawPrice}`;
+      }
       prodHtml+=`<a class="dash-mini-item" href="${item.url||'#'}" target="_blank" rel="noopener" onclick="event.stopPropagation()">
         <div class="dash-mini-thumb">
           ${imgEl}${phEl}
           <div class="dash-mini-rank ${rc}">${r}</div>
         </div>
         <div class="dash-mini-name">${item.name||'No Name'}</div>
+        ${priceDisplay ? `<div class="dash-mini-price">${priceDisplay}</div>` : ''}
       </a>`;
     });
     prodHtml += '</div>';
@@ -1684,6 +1711,8 @@ function render() {
       const r=item.position||'—';
       const rc=r===1?'r1':r===2?'r2':r===3?'r3':'rn';
       const price=fmtPrice(item._price_value, item._price_currency);
+      const usd = toUSD(item._price_value, item._price_currency);
+      const priceStr = price ? (usd ? `${price} <span style="color:#aaa;font-weight:500">(${usd})</span>` : price) : null;
       const th=item.thumbnailUrl;
       const imgH=th?`<img src="${th}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`:'';
       const ph=`<div class="ph" style="${th?'display:none':''}">🧴</div>`;
@@ -1695,7 +1724,7 @@ function render() {
             <div class="cname">${item.name||'No Name'}</div>
             ${item.stars?`<div class="cstars"><span class="sv">${starViz(item.stars)}</span><span class="sn">${item.stars.toFixed(1)}</span></div>`:''}
             ${item.reviewsCount?`<div class="crev">리뷰 ${fmtN(item.reviewsCount)}개</div>`:''}
-            <div class="cprice${price?'':' np'}">${price||'가격 미정'}</div>
+            <div class="cprice${priceStr?'':' np'}">${priceStr||'가격 미정'}</div>
             ${item.asin?`<div class="casin">ASIN: ${item.asin}</div>`:''}
           </div>
         </a>
@@ -3013,7 +3042,7 @@ function vSwitchPlatform(p) {
     tiktokHub.style.display = 'flex';
   } else if (p === 'twitter') {
     hdr.className = 'vh-subheader twitter';
-    document.getElementById('vh-hub-title').textContent = 'K-Beauty X (Twitter) Hub';
+    document.getElementById('vh-hub-title').textContent = '🇯🇵 K-Beauty Japan X (Twitter) Hub';
     twitterHub.style.display = 'block';
     if (!vxAllDates.length) vInitTwitter();
   } else {

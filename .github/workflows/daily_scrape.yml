@@ -1,0 +1,45 @@
+name: K-Beauty Daily Scrape
+
+on:
+  schedule:
+    - cron: "0 0 * * *"   # 매일 오전 9시 KST (= UTC 00:00)
+  workflow_dispatch:        # 수동 실행 버튼
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run Twitter JP scraper
+        env:
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+        run: python twitter_scraper.py
+
+      - name: Commit Twitter data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add twitter_*.json
+          git diff --staged --quiet || git commit -m "auto: daily twitter JP data $(date +'%Y-%m-%d')"
+          git push
+
+      - name: Refresh Vercel product data (Amazon/OY/YS/TT)
+        run: |
+          sleep 60
+          curl -s -X POST https://kbeautyresearch.vercel.app/api/refresh \
+            -H "Content-Type: application/json" \
+            --max-time 120 | python3 -c "import sys,json; d=json.load(sys.stdin); print('✅ Products:', d.get('count'), 'updated_at:', d.get('updated_at'))"
