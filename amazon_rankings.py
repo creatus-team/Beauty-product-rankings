@@ -656,6 +656,112 @@ def api_trends_timeline():
     return jsonify(timeline)
 
 
+@app.route("/api/trends/creators")
+def api_trends_creators():
+    """크리에이터 초기 신호 감지 — 팔로워 적은데 인게이지먼트 높은 크리에이터"""
+    BEAUTY_TERMS = {
+        "韓国","korea","kbeauty","k-beauty","kビューティー","cosrx","anua","laneige",
+        "romand","skin1004","3ce","innisfree","missha","skincare","スキンケア","コスメ",
+        "化粧品","美容","美白","保湿","毛穴","ガラス肌","serum","toner","moisturizer",
+        "sunscreen","niacinamide","ceramide","retinol","hyaluronic","韓国コスメ",
+        "韓国スキンケア","コリアンビューティー","beauty of joseon","oliveyoung",
+        "k beauty","korean skincare","skinbarrier","cica","pdrn","aha","bha",
+        "スキンケアルーティン","ルーティン","美肌",
+    }
+    files = sorted(glob.glob(os.path.join(_SCRIPT_DIR, "twitter_*.json")), reverse=True)[:14]
+    creators = {}
+
+    for fpath in files:
+        try:
+            with open(fpath, encoding="utf-8") as f:
+                tweets = json.load(f)
+        except Exception:
+            continue
+        for t in tweets:
+            if t.get("is_retweet"):
+                continue
+            author = t.get("author") or {}
+            username = (author.get("username") or "").strip()
+            if not username:
+                continue
+            followers = int(author.get("followers") or 0)
+            if followers < 100 or followers > 100_000:
+                continue
+
+            # 트윗 텍스트/해시태그 자체에 뷰티 관련 단어가 있는 것만 포함
+            text_lower = (t.get("text") or "").lower()
+            tags_lower = " ".join(t.get("hashtags") or []).lower()
+            beauty_check = text_lower + " " + tags_lower
+            if not any(term in beauty_check for term in BEAUTY_TERMS):
+                continue
+
+            likes    = int(t.get("likes")    or 0)
+            retweets = int(t.get("retweets") or 0)
+            replies  = int(t.get("replies")  or 0)
+            views    = int(t.get("views")    or 0)
+            engagement = likes + retweets * 3 + replies * 2
+            er = engagement / followers * 100
+
+            if username not in creators:
+                creators[username] = {
+                    "username": username,
+                    "name": author.get("name") or username,
+                    "followers": followers,
+                    "verified": bool(author.get("verified")),
+                    "avatar": author.get("avatar") or "",
+                    "url": author.get("url") or f"https://x.com/{username}",
+                    "tweet_count": 0,
+                    "total_engagement": 0,
+                    "total_er": 0.0,
+                    "total_views": 0,
+                    "keywords": [],
+                    "tweets": [],
+                }
+            c = creators[username]
+            c["tweet_count"] += 1
+            c["total_engagement"] += engagement
+            c["total_er"] += er
+            c["total_views"] += views
+            tag = t.get("source_tag") or ""
+            if tag and tag not in c["keywords"]:
+                c["keywords"].append(tag)
+            c["tweets"].append({
+                "text":       (t.get("text") or "")[:200],
+                "likes":      likes,
+                "retweets":   retweets,
+                "replies":    replies,
+                "views":      views,
+                "url":        t.get("url") or "",
+                "engagement": engagement,
+            })
+
+    result = []
+    for c in creators.values():
+        if c["tweet_count"] < 1:
+            continue
+        avg_er = c["total_er"] / c["tweet_count"]
+        discovery_bonus = 1 + (1 - min(c["followers"] / 50_000, 1)) * 0.6
+        signal = round(avg_er * discovery_bonus, 2)
+        top_tweet = sorted(c["tweets"], key=lambda x: x["engagement"], reverse=True)[0]
+        result.append({
+            "username":     c["username"],
+            "name":         c["name"],
+            "followers":    c["followers"],
+            "verified":     c["verified"],
+            "avatar":       c["avatar"],
+            "url":          c["url"],
+            "tweet_count":  c["tweet_count"],
+            "avg_er":       round(avg_er, 2),
+            "total_views":  c["total_views"],
+            "signal_score": signal,
+            "keywords":     c["keywords"][:6],
+            "top_tweet":    top_tweet,
+        })
+
+    result.sort(key=lambda x: x["signal_score"], reverse=True)
+    return jsonify(result[:30])
+
+
 @app.route("/api/trends/gaps")
 def api_trends_gaps():
     """공백 시장 탐지 — 소셜 버즈 높은데 상품 희박한 키워드"""
@@ -1306,6 +1412,44 @@ select.fs:focus{border-color:var(--pink);background:#fff}
   background:linear-gradient(135deg,#2d3561,#1a1f3c);color:white;margin-bottom:8px}
 #trend-hub .empty-state{text-align:center;padding:60px;color:#ccc}
 #trend-hub .empty-state .icon{font-size:3rem;margin-bottom:12px}
+
+/* 크리에이터 신호 카드 */
+#trend-hub .cr-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+#trend-hub .cr-card{background:white;border-radius:14px;padding:18px;
+  box-shadow:0 1px 4px rgba(0,0,0,0.06);border-top:3px solid #ccc;
+  transition:transform 0.15s,box-shadow 0.15s}
+#trend-hub .cr-card:hover{transform:translateY(-2px);box-shadow:0 4px 16px rgba(0,0,0,0.1)}
+#trend-hub .cr-card.tier-breakthrough{border-top-color:#ef4444}
+#trend-hub .cr-card.tier-rising{border-top-color:#f59e0b}
+#trend-hub .cr-card.tier-emerging{border-top-color:#3b82f6}
+#trend-hub .cr-header{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+#trend-hub .cr-avatar{width:48px;height:48px;border-radius:50%;object-fit:cover;
+  background:#f0f0f0;flex-shrink:0;border:2px solid #eee}
+#trend-hub .cr-avatar-ph{width:48px;height:48px;border-radius:50%;background:#f0f4ff;
+  display:flex;align-items:center;justify-content:center;font-size:1.3rem;flex-shrink:0}
+#trend-hub .cr-meta{flex:1;min-width:0}
+#trend-hub .cr-name{font-weight:800;font-size:0.92rem;color:#1a1a1a;
+  display:flex;align-items:center;gap:5px}
+#trend-hub .cr-handle{font-size:0.75rem;color:#888;margin-top:1px}
+#trend-hub .cr-signal-badge{font-size:0.62rem;font-weight:800;padding:2px 8px;
+  border-radius:10px;white-space:nowrap}
+#trend-hub .cr-signal-badge.tier-breakthrough{background:#fee2e2;color:#ef4444}
+#trend-hub .cr-signal-badge.tier-rising{background:#fef3c7;color:#d97706}
+#trend-hub .cr-signal-badge.tier-emerging{background:#dbeafe;color:#2563eb}
+#trend-hub .cr-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+#trend-hub .cr-stat{text-align:center;background:#f9f9f9;border-radius:8px;padding:7px 5px}
+#trend-hub .cr-stat .sv{font-size:0.88rem;font-weight:800;color:#333}
+#trend-hub .cr-stat .sl{font-size:0.6rem;color:#aaa;margin-top:2px}
+#trend-hub .cr-tweet{background:#f8f9ff;border-radius:9px;padding:10px 12px;
+  font-size:0.8rem;color:#444;line-height:1.5;margin-bottom:10px;
+  border-left:3px solid #c7d2fe;max-height:80px;overflow:hidden}
+#trend-hub .cr-keywords{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px}
+#trend-hub .cr-kw{background:#f0f4ff;color:#4f46e5;font-size:0.65rem;
+  padding:2px 8px;border-radius:10px;font-weight:600}
+#trend-hub .cr-footer{display:flex;justify-content:space-between;align-items:center}
+#trend-hub .cr-link{color:#1d9bf0;text-decoration:none;font-size:0.75rem;font-weight:700}
+#trend-hub .cr-link:hover{text-decoration:underline}
+#trend-hub .cr-er{font-size:0.75rem;font-weight:800;color:#10b981}
 @media(max-width:768px){
   #trend-hub .tr-body{padding:16px}
   #trend-hub .gap-grid{grid-template-columns:1fr}
@@ -1605,6 +1749,7 @@ select.fs:focus{border-color:var(--pink);background:#fff}
     <div class="tr-tabs">
       <button class="tr-tab active" id="tr-tab-timeline" onclick="trSwitchTab('timeline',this)">📊 키워드 타임라인</button>
       <button class="tr-tab" id="tr-tab-gaps" onclick="trSwitchTab('gaps',this)">🔍 공백 시장 탐지</button>
+      <button class="tr-tab" id="tr-tab-creators" onclick="trSwitchTab('creators',this)">🌱 크리에이터 신호</button>
     </div>
   </div>
 
@@ -1646,6 +1791,26 @@ select.fs:focus{border-color:var(--pink);background:#fff}
     <div id="tr-gaps-empty" class="empty-state" style="display:none">
       <div class="icon">🔍</div>
       <p>Twitter 데이터가 없어. 먼저 Twitter 수집 후 다시 확인해.</p>
+    </div>
+  </div>
+
+  <!-- 크리에이터 신호 패널 -->
+  <div id="tr-panel-creators" class="tr-body" style="display:none">
+    <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:20px;flex-wrap:wrap">
+      <div style="font-size:0.82rem;color:#666;line-height:1.6;max-width:680px">
+        팔로워 대비 인게이지먼트가 높은 K-beauty 크리에이터 = 아직 주류화 전 초기 신호.<br>
+        <span style="color:#ef4444;font-weight:700">🔴 Breakthrough</span> ER 20%+ &nbsp;
+        <span style="color:#d97706;font-weight:700">🟡 Rising</span> ER 5~20% &nbsp;
+        <span style="color:#2563eb;font-weight:700">🔵 Emerging</span> ER 5% 미만<br>
+        <span style="font-size:0.73rem;color:#aaa">ER = (좋아요 + RT×3 + 답글×2) ÷ 팔로워 × 100. 팔로워 100~10만 계정만 포함.</span>
+      </div>
+      <button onclick="trLoadCreators()" style="margin-left:auto;padding:8px 18px;background:#2d3561;color:white;
+        border:none;border-radius:9px;font-weight:700;font-size:0.82rem;cursor:pointer">↻ 새로 분석</button>
+    </div>
+    <div id="tr-creators-grid" class="cr-grid"></div>
+    <div id="tr-creators-empty" class="empty-state" style="display:none">
+      <div class="icon">🌱</div>
+      <p>K-beauty 크리에이터 데이터가 없어. 먼저 Twitter 수집 후 다시 확인해.</p>
     </div>
   </div>
 </div>
@@ -3558,8 +3723,10 @@ function vHideVideoPreview() {
 // 트렌드 인사이트 HUB
 // ══════════════════════════════════════════════════════════════════════════
 let trInitialized = false;
-let trTimelineData = {};   // {date: {keyword: {tweets,likes,views,buzz}}}
+let trTimelineData = {};
 let trGapsData = [];
+let trCreatorsData = [];
+let trCreatorsLoaded = false;
 let trActiveKws = new Set();
 let trChart = null;
 
@@ -3575,10 +3742,12 @@ async function trInit() {
 }
 
 function trSwitchTab(tab, btn) {
-  document.getElementById('tr-panel-timeline').style.display = tab === 'timeline' ? '' : 'none';
-  document.getElementById('tr-panel-gaps').style.display     = tab === 'gaps'     ? '' : 'none';
+  document.getElementById('tr-panel-timeline').style.display  = tab === 'timeline'  ? '' : 'none';
+  document.getElementById('tr-panel-gaps').style.display      = tab === 'gaps'      ? '' : 'none';
+  document.getElementById('tr-panel-creators').style.display  = tab === 'creators'  ? '' : 'none';
   document.querySelectorAll('#trend-hub .tr-tab').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
+  if (tab === 'creators' && !trCreatorsLoaded) { trLoadCreators(); trCreatorsLoaded = true; }
 }
 
 // ── Timeline ──────────────────────────────────────────────────────────────
@@ -3735,6 +3904,77 @@ async function trLoadGaps() {
         <div class="gap-bar-track"><div class="gap-bar-fill" style="width:\${buzzPct}%;background:\${barCol}"></div></div>
       </div>
       <div class="gap-opportunity">\${opportunity}</div>
+    </div>\`;
+  }).join('');
+}
+
+// ── Creator Signal Detection ───────────────────────────────────────────────
+
+async function trLoadCreators() {
+  const grid  = document.getElementById('tr-creators-grid');
+  const empty = document.getElementById('tr-creators-empty');
+  grid.innerHTML = '<div style="padding:40px;text-align:center;color:#aaa;font-size:0.85rem">분석 중...</div>';
+  empty.style.display = 'none';
+  try {
+    const r = await fetch('/api/trends/creators');
+    trCreatorsData = await r.json();
+  } catch(e) { trCreatorsData = []; }
+
+  if (!trCreatorsData.length) {
+    grid.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+
+  const maxSignal = trCreatorsData[0]?.signal_score || 1;
+
+  grid.innerHTML = trCreatorsData.map((c, i) => {
+    const er = c.avg_er;
+    let tier, tierLabel, tierEmoji;
+    if (er >= 20)     { tier = 'tier-breakthrough'; tierLabel = 'Breakthrough'; tierEmoji = '🔴'; }
+    else if (er >= 5) { tier = 'tier-rising';       tierLabel = 'Rising';       tierEmoji = '🟡'; }
+    else              { tier = 'tier-emerging';      tierLabel = 'Emerging';     tierEmoji = '🔵'; }
+
+    const avatar = c.avatar
+      ? \`<img class="cr-avatar" src="\${vEsc(c.avatar)}" onerror="this.style.display='none'">\`
+      : \`<div class="cr-avatar-ph">👤</div>\`;
+
+    const verified = c.verified
+      ? \`<span style="background:#1d9bf0;color:white;font-size:0.6rem;padding:1px 6px;border-radius:8px;font-weight:700">✓</span>\`
+      : '';
+
+    const kwHtml = (c.keywords || []).map(k =>
+      \`<span class="cr-kw">\${vEsc(k)}</span>\`
+    ).join('');
+
+    const tweet = c.top_tweet || {};
+    const tweetText = (tweet.text || '').replace(/https?:\/\/\S+/g, '').trim().slice(0, 120);
+
+    const signalPct = Math.round(c.signal_score / maxSignal * 100);
+
+    return \`<div class="cr-card \${tier}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+        <span class="cr-signal-badge \${tier}">\${tierEmoji} \${tierLabel} · SIGNAL \${signalPct}</span>
+        <span style="font-size:0.7rem;color:#aaa">#\${i+1}</span>
+      </div>
+      <div class="cr-header">
+        \${avatar}
+        <div class="cr-meta">
+          <div class="cr-name">\${vEsc(c.name)}\${verified}</div>
+          <div class="cr-handle">@\${vEsc(c.username)} · \${trFmt(c.followers)} 팔로워</div>
+        </div>
+      </div>
+      <div class="cr-stats">
+        <div class="cr-stat"><div class="sv">\${er.toFixed(1)}%</div><div class="sl">평균 ER</div></div>
+        <div class="cr-stat"><div class="sv">\${trFmt(tweet.likes||0)}</div><div class="sl">최고 좋아요</div></div>
+        <div class="cr-stat"><div class="sv">\${trFmt(c.total_views||0)}</div><div class="sl">총 뷰</div></div>
+      </div>
+      \${tweetText ? \`<div class="cr-tweet">\${vEsc(tweetText)}</div>\` : ''}
+      \${kwHtml ? \`<div class="cr-keywords">\${kwHtml}</div>\` : ''}
+      <div class="cr-footer">
+        <a class="cr-link" href="\${vEsc(c.url||'#')}" target="_blank">X에서 보기 →</a>
+        <span class="cr-er">ER \${er.toFixed(1)}%</span>
+      </div>
     </div>\`;
   }).join('');
 }
