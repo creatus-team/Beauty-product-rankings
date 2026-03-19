@@ -627,6 +627,125 @@ def api_cron_refresh():
     cache = save_cache(items)
     return jsonify({"ok": True, "count": len(items), "updated_at": cache["updated_at"]})
 
+@app.route("/api/trends/timeline")
+def api_trends_timeline():
+    """날짜별 Twitter 키워드 인게이지먼트 타임라인"""
+    files = sorted(glob.glob(os.path.join(_SCRIPT_DIR, "twitter_*.json")))
+    timeline = {}
+    for fpath in files:
+        date = os.path.basename(fpath).replace("twitter_","").replace(".json","")
+        try:
+            with open(fpath, encoding="utf-8") as f:
+                tweets = json.load(f)
+        except Exception:
+            continue
+        day = {}
+        for t in tweets:
+            tag = t.get("source_tag") or "other"
+            if tag not in day:
+                day[tag] = {"tweets": 0, "likes": 0, "views": 0, "retweets": 0, "buzz": 0}
+            likes    = int(t.get("likes", 0) or 0)
+            views    = int(t.get("views", 0) or 0)
+            retweets = int(t.get("retweets", 0) or 0)
+            day[tag]["tweets"]   += 1
+            day[tag]["likes"]    += likes
+            day[tag]["views"]    += views
+            day[tag]["retweets"] += retweets
+            day[tag]["buzz"]     += likes * 2 + retweets * 5 + views // 100
+        timeline[date] = day
+    return jsonify(timeline)
+
+
+@app.route("/api/trends/gaps")
+def api_trends_gaps():
+    """공백 시장 탐지 — 소셜 버즈 높은데 상품 희박한 키워드"""
+    KBEAUTY_TERMS = {
+        "韓国","kbeauty","k-beauty","kビューティー","コリアンビューティー",
+        "cosrx","anua","laneige","romand","3ce","innisfree","missha","skin1004",
+        "beauty of joseon","cerave","セラミド","ナイアシンアミド","レチノール",
+        "ヒアルロン酸","パンテノール","ビタミンc","スキンケア","コスメ","化粧品",
+        "美容","美白","保湿","毛穴","ガラス肌","韓国コスメ","韓国スキンケア",
+        "niacinamide","ceramide","retinol","hyaluronic","panthenol","sunscreen",
+        "toner","serum","moisturizer","exfoliant","bha","aha","pdrn","cica",
+        "올리브영","韓国化粧品","oliveyoung","skincare","skinbarrier",
+    }
+    # 최근 14개 파일에서 버즈 집계
+    files = sorted(glob.glob(os.path.join(_SCRIPT_DIR, "twitter_*.json")), reverse=True)[:14]
+    tag_buzz = {}
+    htag_buzz = {}
+    for fpath in files:
+        try:
+            with open(fpath, encoding="utf-8") as f:
+                tweets = json.load(f)
+        except Exception:
+            continue
+        for t in tweets:
+            likes    = int(t.get("likes", 0) or 0)
+            views    = int(t.get("views", 0) or 0)
+            retweets = int(t.get("retweets", 0) or 0)
+            buzz = likes * 2 + retweets * 5 + views // 100
+            tag = t.get("source_tag") or ""
+            if tag:
+                if tag not in tag_buzz:
+                    tag_buzz[tag] = {"buzz":0,"tweets":0,"likes":0,"views":0}
+                tag_buzz[tag]["buzz"]   += buzz
+                tag_buzz[tag]["tweets"] += 1
+                tag_buzz[tag]["likes"]  += likes
+                tag_buzz[tag]["views"]  += views
+            for h in (t.get("hashtags") or []):
+                h = h.lower().strip()
+                if len(h) < 3 or len(h) > 30:
+                    continue
+                if not any(term in h for term in KBEAUTY_TERMS) and h not in KBEAUTY_TERMS:
+                    continue
+                if h not in htag_buzz:
+                    htag_buzz[h] = {"buzz":0,"tweets":0,"likes":0,"views":0}
+                htag_buzz[h]["buzz"]   += buzz
+                htag_buzz[h]["tweets"] += 1
+                htag_buzz[h]["likes"]  += likes
+                htag_buzz[h]["views"]  += views
+
+    # 아마존/TikTok 상품 풀텍스트
+    product_text = ""
+    try:
+        cpath = CACHE_FILE if os.path.exists(CACHE_FILE) else BUNDLED_CACHE
+        with open(cpath, encoding="utf-8") as f:
+            product_text = " ".join(
+                (i.get("name","") or "").lower()
+                for i in json.load(f).get("items",[])
+            )
+    except Exception:
+        pass
+
+    gaps = []
+    def score_entry(kw, data, prefix=""):
+        if data["tweets"] < 2:
+            return None
+        kw_lower = kw.lower()
+        hits = product_text.count(kw_lower)
+        gap = data["buzz"] / (1 + hits * 15)
+        return {
+            "keyword": prefix + kw,
+            "type": "hashtag" if prefix == "#" else "keyword",
+            "buzz": data["buzz"],
+            "tweets": data["tweets"],
+            "likes": data["likes"],
+            "views": data["views"],
+            "product_hits": hits,
+            "gap_score": round(gap, 1),
+        }
+
+    for kw, data in tag_buzz.items():
+        e = score_entry(kw, data)
+        if e: gaps.append(e)
+    for kw, data in htag_buzz.items():
+        e = score_entry(kw, data, prefix="#")
+        if e: gaps.append(e)
+
+    gaps.sort(key=lambda x: x["gap_score"], reverse=True)
+    return jsonify(gaps[:40])
+
+
 @app.route("/api/run/twitter", methods=["POST"])
 def api_run_twitter():
     script = os.path.join(_SCRIPT_DIR, "twitter_scraper.py")
@@ -647,6 +766,7 @@ HTML = r"""<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>🛒 Beauty Product Rankings</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -1123,6 +1243,73 @@ select.fs:focus{border-color:var(--pink);background:#fff}
   #video-hub .video-grid{grid-template-columns:1fr}
   #video-hub .tweet-grid{grid-template-columns:1fr}
 }
+
+/* ── 트렌드 인사이트 허브 ─────────────────────────────── */
+#trend-hub{display:none;min-height:calc(100vh - 56px);background:var(--bg)}
+#trend-hub .tr-header{background:linear-gradient(135deg,#2d3561 0%,#1a1f3c 100%);
+  padding:20px 28px;display:flex;align-items:center;justify-content:space-between;
+  flex-wrap:wrap;gap:12px}
+#trend-hub .tr-title{color:white;font-size:1.1rem;font-weight:800;display:flex;align-items:center;gap:8px}
+#trend-hub .tr-sub{color:rgba(255,255,255,0.6);font-size:0.78rem;margin-top:2px}
+#trend-hub .tr-tabs{display:flex;gap:8px}
+#trend-hub .tr-tab{padding:8px 20px;border-radius:20px;border:none;font-size:0.82rem;
+  font-weight:700;cursor:pointer;transition:all 0.2s;
+  background:rgba(255,255,255,0.12);color:rgba(255,255,255,0.75)}
+#trend-hub .tr-tab:hover{background:rgba(255,255,255,0.2);color:white}
+#trend-hub .tr-tab.active{background:white;color:#2d3561}
+#trend-hub .tr-body{padding:24px 28px}
+
+/* 타임라인 섹션 */
+#trend-hub .tl-controls{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:20px}
+#trend-hub .tl-metric-sel{padding:8px 14px;border:1.5px solid var(--border);border-radius:9px;
+  font-size:0.82rem;background:white;cursor:pointer;outline:none;color:var(--text)}
+#trend-hub .tl-kw-pills{display:flex;flex-wrap:wrap;gap:6px}
+#trend-hub .tl-pill{padding:5px 13px;border-radius:20px;border:1.5px solid var(--border);
+  background:white;font-size:0.75rem;font-weight:700;cursor:pointer;transition:all 0.15s;color:#555}
+#trend-hub .tl-pill.active{color:white;border-color:transparent}
+#trend-hub .tl-pill:hover{opacity:0.85}
+#trend-hub .chart-card{background:white;border-radius:16px;padding:24px;
+  box-shadow:0 1px 6px rgba(0,0,0,0.06);margin-bottom:24px}
+#trend-hub .chart-card canvas{max-height:340px}
+#trend-hub .chart-label{font-size:0.78rem;font-weight:800;color:var(--muted);
+  text-transform:uppercase;letter-spacing:0.6px;margin-bottom:12px}
+
+/* 공백 탐지 섹션 */
+#trend-hub .gap-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
+#trend-hub .gap-card{background:white;border-radius:14px;padding:18px;
+  box-shadow:0 1px 4px rgba(0,0,0,0.06);border-left:4px solid #ccc;
+  transition:transform 0.15s,box-shadow 0.15s}
+#trend-hub .gap-card:hover{transform:translateY(-2px);box-shadow:0 4px 16px rgba(0,0,0,0.1)}
+#trend-hub .gap-card.hot{border-left-color:#ef4444}
+#trend-hub .gap-card.warm{border-left-color:#f59e0b}
+#trend-hub .gap-card.cool{border-left-color:#3b82f6}
+#trend-hub .gap-keyword{font-size:1rem;font-weight:800;color:#1a1a1a;margin-bottom:8px;
+  display:flex;align-items:center;gap:6px}
+#trend-hub .gap-badge{font-size:0.65rem;font-weight:700;padding:3px 8px;border-radius:10px;
+  text-transform:uppercase;letter-spacing:0.5px}
+#trend-hub .gap-badge.hot{background:#fee2e2;color:#ef4444}
+#trend-hub .gap-badge.warm{background:#fef3c7;color:#d97706}
+#trend-hub .gap-badge.cool{background:#dbeafe;color:#2563eb}
+#trend-hub .gap-badge.covered{background:#f0fdf4;color:#16a34a}
+#trend-hub .gap-metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0}
+#trend-hub .gap-metric{text-align:center;background:#f9f9f9;border-radius:8px;padding:8px 6px}
+#trend-hub .gap-metric .gv{font-size:0.92rem;font-weight:800;color:#333}
+#trend-hub .gap-metric .gl{font-size:0.62rem;color:#aaa;margin-top:2px}
+#trend-hub .gap-bar-wrap{margin-top:10px}
+#trend-hub .gap-bar-label{display:flex;justify-content:space-between;font-size:0.72rem;color:#aaa;margin-bottom:4px}
+#trend-hub .gap-bar-track{background:#f0f0f0;border-radius:10px;height:6px;overflow:hidden}
+#trend-hub .gap-bar-fill{height:100%;border-radius:10px;transition:width 0.5s}
+#trend-hub .gap-opportunity{font-size:0.75rem;color:#555;margin-top:10px;
+  background:#fafafa;border-radius:8px;padding:8px 10px;line-height:1.5}
+#trend-hub .gap-score-badge{display:inline-flex;align-items:center;gap:4px;
+  font-size:0.7rem;font-weight:800;padding:3px 10px;border-radius:12px;
+  background:linear-gradient(135deg,#2d3561,#1a1f3c);color:white;margin-bottom:8px}
+#trend-hub .empty-state{text-align:center;padding:60px;color:#ccc}
+#trend-hub .empty-state .icon{font-size:3rem;margin-bottom:12px}
+@media(max-width:768px){
+  #trend-hub .tr-body{padding:16px}
+  #trend-hub .gap-grid{grid-template-columns:1fr}
+}
 </style>
 </head>
 <body>
@@ -1144,6 +1331,7 @@ select.fs:focus{border-color:var(--pink);background:#fff}
     <div class="mode-switch">
       <button class="mode-btn active" id="mode-product" onclick="switchMode('product')">📦 Product</button>
       <button class="mode-btn" id="mode-video" onclick="switchMode('video')">🎬 Video</button>
+      <button class="mode-btn" id="mode-trend" onclick="switchMode('trend')">📈 트렌드</button>
     </div>
     <span class="upd" id="updLbl">—</span>
     <button id="refreshBtn" onclick="refreshData()">↻ 새로고침</button>
@@ -1406,6 +1594,61 @@ select.fs:focus{border-color:var(--pink);background:#fff}
 
 <div id="v-toast"></div>
 </div><!-- /video-hub -->
+
+<!-- ── 트렌드 인사이트 허브 ──────────────────────────── -->
+<div id="trend-hub">
+  <div class="tr-header">
+    <div>
+      <div class="tr-title">📈 K-Beauty 트렌드 인사이트</div>
+      <div class="tr-sub">소셜 버즈 × 상품 공백 분석 — 데이터 기반 PB 기회 탐지</div>
+    </div>
+    <div class="tr-tabs">
+      <button class="tr-tab active" id="tr-tab-timeline" onclick="trSwitchTab('timeline',this)">📊 키워드 타임라인</button>
+      <button class="tr-tab" id="tr-tab-gaps" onclick="trSwitchTab('gaps',this)">🔍 공백 시장 탐지</button>
+    </div>
+  </div>
+
+  <!-- 타임라인 패널 -->
+  <div id="tr-panel-timeline" class="tr-body">
+    <div class="tl-controls">
+      <select class="tl-metric-sel" id="tl-metric" onchange="trRenderTimeline()">
+        <option value="buzz">🔥 버즈 스코어</option>
+        <option value="likes">❤️ 좋아요</option>
+        <option value="views">👁 뷰</option>
+        <option value="tweets">✉️ 트윗 수</option>
+      </select>
+      <div class="tl-kw-pills" id="tl-kw-pills"></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-label">날짜별 키워드 인게이지먼트 추이 (JP Twitter)</div>
+      <canvas id="tl-chart"></canvas>
+    </div>
+    <div id="tl-empty" class="empty-state" style="display:none">
+      <div class="icon">📊</div>
+      <p>Twitter 수집 데이터가 2개 이상 날짜 있어야 타임라인이 표시돼.</p>
+      <p style="margin-top:8px;font-size:0.8rem;color:#bbb">Run New Scrape → 다음날 재확인</p>
+    </div>
+  </div>
+
+  <!-- 공백 탐지 패널 -->
+  <div id="tr-panel-gaps" class="tr-body" style="display:none">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap">
+      <div style="font-size:0.82rem;color:#666;line-height:1.6;max-width:640px">
+        소셜에서 많이 언급되는데 아마존·TikTok에 상품이 적은 키워드 = PB 진입 기회.<br>
+        <span style="color:#ef4444;font-weight:700">🔴 Hot Gap</span> 최우선 검토 &nbsp;
+        <span style="color:#d97706;font-weight:700">🟡 Warm Gap</span> 관찰 &nbsp;
+        <span style="color:#2563eb;font-weight:700">🔵 Well-covered</span> 경쟁 포화
+      </div>
+      <button onclick="trLoadGaps()" style="margin-left:auto;padding:8px 18px;background:#2d3561;color:white;
+        border:none;border-radius:9px;font-weight:700;font-size:0.82rem;cursor:pointer">↻ 새로 분석</button>
+    </div>
+    <div id="tr-gaps-grid" class="gap-grid"></div>
+    <div id="tr-gaps-empty" class="empty-state" style="display:none">
+      <div class="icon">🔍</div>
+      <p>Twitter 데이터가 없어. 먼저 Twitter 수집 후 다시 확인해.</p>
+    </div>
+  </div>
+</div>
 
 <script>
 let all = [], country = 'DB', ysSub = 'All Beauty', oySub = 'All', qjSub = 'All', ttSub = 'All', ttPeriod = '30d';
@@ -2211,12 +2454,14 @@ let videoHubInitialized = false;
 function switchMode(mode) {
   currentMode = mode;
   document.getElementById('product-hub').style.display = mode === 'product' ? '' : 'none';
-  document.getElementById('video-hub').style.display = mode === 'video' ? '' : 'none';
+  document.getElementById('video-hub').style.display   = mode === 'video'   ? '' : 'none';
+  document.getElementById('trend-hub').style.display   = mode === 'trend'   ? '' : 'none';
   document.getElementById('mode-product').classList.toggle('active', mode === 'product');
   document.getElementById('mode-video').classList.toggle('active', mode === 'video');
+  document.getElementById('mode-trend').classList.toggle('active', mode === 'trend');
   const title = document.getElementById('mainTitle');
-  const sub = document.getElementById('mainSub');
-  const logo = document.getElementById('mainLogo');
+  const sub   = document.getElementById('mainSub');
+  const logo  = document.getElementById('mainLogo');
   const refreshBtn = document.getElementById('refreshBtn');
   if (mode === 'product') {
     title.textContent = 'Beauty Product Rankings';
@@ -2224,13 +2469,20 @@ function switchMode(mode) {
     logo.textContent = '🛒';
     refreshBtn.style.display = '';
     document.getElementById('updLbl').style.display = '';
-  } else {
+  } else if (mode === 'video') {
     title.textContent = 'K-Beauty Research Hub';
     sub.textContent = 'TikTok & X 바이럴 컨텐츠 분석';
     logo.textContent = '🔬';
     refreshBtn.style.display = 'none';
     document.getElementById('updLbl').style.display = 'none';
     if (!videoHubInitialized) { initVideoHub(); videoHubInitialized = true; }
+  } else {
+    title.textContent = 'K-Beauty 트렌드 인사이트';
+    sub.textContent = '소셜 버즈 × 공백 시장 분석';
+    logo.textContent = '📈';
+    refreshBtn.style.display = 'none';
+    document.getElementById('updLbl').style.display = 'none';
+    if (!trInitialized) { trInit(); trInitialized = true; }
   }
 }
 
@@ -3300,6 +3552,198 @@ function vHideVideoPreview() {
   previewEl.classList.remove('active');
   previewEl.innerHTML = '';
   vPreviewActive = false;
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// 트렌드 인사이트 HUB
+// ══════════════════════════════════════════════════════════════════════════
+let trInitialized = false;
+let trTimelineData = {};   // {date: {keyword: {tweets,likes,views,buzz}}}
+let trGapsData = [];
+let trActiveKws = new Set();
+let trChart = null;
+
+const TR_COLORS = [
+  '#6366f1','#ec4899','#f59e0b','#10b981','#3b82f6',
+  '#ef4444','#8b5cf6','#14b8a6','#f97316','#06b6d4',
+  '#84cc16','#a78bfa','#fb7185','#34d399','#fbbf24',
+];
+
+async function trInit() {
+  await trLoadTimeline();
+  trLoadGaps();
+}
+
+function trSwitchTab(tab, btn) {
+  document.getElementById('tr-panel-timeline').style.display = tab === 'timeline' ? '' : 'none';
+  document.getElementById('tr-panel-gaps').style.display     = tab === 'gaps'     ? '' : 'none';
+  document.querySelectorAll('#trend-hub .tr-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+// ── Timeline ──────────────────────────────────────────────────────────────
+
+async function trLoadTimeline() {
+  try {
+    const r = await fetch('/api/trends/timeline');
+    trTimelineData = await r.json();
+  } catch(e) { trTimelineData = {}; }
+
+  const dates = Object.keys(trTimelineData).sort();
+  if (dates.length < 1) {
+    document.getElementById('tl-empty').style.display = '';
+    document.querySelector('#tr-panel-timeline .chart-card').style.display = 'none';
+    return;
+  }
+
+  // Collect all keywords across all dates
+  const kwSet = new Set();
+  Object.values(trTimelineData).forEach(day => Object.keys(day).forEach(k => kwSet.add(k)));
+  const allKws = [...kwSet].sort();
+
+  // Default: pick top 6 by total buzz
+  const kwBuzz = {};
+  allKws.forEach(kw => {
+    kwBuzz[kw] = Object.values(trTimelineData).reduce((s, day) => s + (day[kw]?.buzz || 0), 0);
+  });
+  const topKws = allKws.sort((a,b) => kwBuzz[b] - kwBuzz[a]).slice(0, 6);
+  trActiveKws = new Set(topKws);
+
+  // Build pills
+  const pillsEl = document.getElementById('tl-kw-pills');
+  pillsEl.innerHTML = '';
+  allKws.forEach((kw, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'tl-pill' + (trActiveKws.has(kw) ? ' active' : '');
+    btn.textContent = kw;
+    btn.dataset.kw = kw;
+    const col = TR_COLORS[i % TR_COLORS.length];
+    if (trActiveKws.has(kw)) btn.style.background = col;
+    btn.style.setProperty('--col', col);
+    btn.onclick = () => {
+      if (trActiveKws.has(kw)) { trActiveKws.delete(kw); btn.classList.remove('active'); btn.style.background = ''; }
+      else { trActiveKws.add(kw); btn.classList.add('active'); btn.style.background = col; }
+      trRenderTimeline();
+    };
+    pillsEl.appendChild(btn);
+  });
+
+  trRenderTimeline();
+}
+
+function trRenderTimeline() {
+  const metric = document.getElementById('tl-metric').value;
+  const dates  = Object.keys(trTimelineData).sort();
+  const activeKws = [...trActiveKws];
+
+  const datasets = activeKws.map((kw, i) => {
+    const pillBtns = document.querySelectorAll('#tl-kw-pills .tl-pill');
+    let col = TR_COLORS[i % TR_COLORS.length];
+    pillBtns.forEach(b => { if (b.dataset.kw === kw) col = b.style.background || col; });
+    // Find original index for color consistency
+    const allKws = [...document.querySelectorAll('#tl-kw-pills .tl-pill')].map(b => b.dataset.kw);
+    const origIdx = allKws.indexOf(kw);
+    col = TR_COLORS[origIdx % TR_COLORS.length];
+    return {
+      label: kw,
+      data: dates.map(d => trTimelineData[d]?.[kw]?.[metric] || 0),
+      borderColor: col,
+      backgroundColor: col + '22',
+      borderWidth: 2.5,
+      pointRadius: 4,
+      pointHoverRadius: 6,
+      tension: 0.35,
+      fill: false,
+    };
+  });
+
+  const ctx = document.getElementById('tl-chart');
+  if (trChart) { trChart.destroy(); trChart = null; }
+  trChart = new Chart(ctx, {
+    type: 'line',
+    data: { labels: dates, datasets },
+    options: {
+      responsive: true,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'top', labels: { font: { size: 11, weight: '700' }, padding: 16 } },
+        tooltip: {
+          callbacks: {
+            label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString()}`,
+          }
+        }
+      },
+      scales: {
+        x: { grid: { color: '#f0f0f0' }, ticks: { font: { size: 11 } } },
+        y: { grid: { color: '#f0f0f0' }, ticks: { font: { size: 11 },
+             callback: v => v >= 1000 ? (v/1000).toFixed(1)+'K' : v } },
+      }
+    }
+  });
+}
+
+// ── Gap Detection ──────────────────────────────────────────────────────────
+
+async function trLoadGaps() {
+  const grid = document.getElementById('tr-gaps-grid');
+  const empty = document.getElementById('tr-gaps-empty');
+  grid.innerHTML = '<div style="padding:40px;text-align:center;color:#aaa;font-size:0.85rem">분석 중...</div>';
+  empty.style.display = 'none';
+
+  try {
+    const r = await fetch('/api/trends/gaps');
+    trGapsData = await r.json();
+  } catch(e) { trGapsData = []; }
+
+  if (!trGapsData.length) {
+    grid.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+
+  const maxBuzz = Math.max(...trGapsData.map(g => g.buzz), 1);
+  const maxScore = trGapsData[0]?.gap_score || 1;
+
+  grid.innerHTML = trGapsData.map(g => {
+    const pct = Math.round(g.gap_score / maxScore * 100);
+    const buzzPct = Math.round(g.buzz / maxBuzz * 100);
+    let tier, tierLabel;
+    if (pct >= 60)      { tier = 'hot';  tierLabel = '🔴 Hot Gap'; }
+    else if (pct >= 30) { tier = 'warm'; tierLabel = '🟡 Warm Gap'; }
+    else                { tier = 'cool'; tierLabel = '🔵 Well-covered'; }
+
+    const barCol = tier === 'hot' ? '#ef4444' : tier === 'warm' ? '#f59e0b' : '#3b82f6';
+    const opportunity = tier === 'hot'
+      ? 'PB 진입 기회 높음 — 소셜 관심 대비 경쟁 상품 희박'
+      : tier === 'warm'
+      ? '소셜 언급 중간, 상품 일부 존재 — 차별화 가능'
+      : '이미 상품이 많음 — 가격/포지셔닝 차별화 필요';
+
+    return \`<div class="gap-card \${tier}">
+      <div class="gap-score-badge">GAP \${pct}</div>
+      <div class="gap-keyword">
+        <span>\${g.keyword}</span>
+        <span class="gap-badge \${tier}">\${tierLabel}</span>
+      </div>
+      <div class="gap-metrics">
+        <div class="gap-metric"><div class="gv">\${trFmt(g.buzz)}</div><div class="gl">버즈 스코어</div></div>
+        <div class="gap-metric"><div class="gv">\${trFmt(g.likes)}</div><div class="gl">총 좋아요</div></div>
+        <div class="gap-metric"><div class="gv">\${g.product_hits}</div><div class="gl">상품 수</div></div>
+      </div>
+      <div class="gap-bar-wrap">
+        <div class="gap-bar-label"><span>소셜 버즈</span><span>\${trFmt(g.buzz)}</span></div>
+        <div class="gap-bar-track"><div class="gap-bar-fill" style="width:\${buzzPct}%;background:\${barCol}"></div></div>
+      </div>
+      <div class="gap-opportunity">\${opportunity}</div>
+    </div>\`;
+  }).join('');
+}
+
+function trFmt(n) {
+  n = parseInt(n) || 0;
+  if (n >= 1e6) return (n/1e6).toFixed(1)+'M';
+  if (n >= 1e3) return (n/1e3).toFixed(1)+'K';
+  return n.toString();
 }
 
 </script>
