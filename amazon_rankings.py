@@ -521,18 +521,111 @@ def api_run():
     subprocess.Popen([sys.executable, script], stdout=log, stderr=subprocess.STDOUT)
     return jsonify({"ok": True})
 
+TWITTER_ACTOR_ID = "CJdippxWmn9uRfooo"
+_TW_TMP = "/tmp/twitter_apify_cache.json"
+
+def _normalize_tweet(item, source_tag="twitter"):
+    try:
+        if item.get("noResults") or not item.get("id"):
+            return None
+        author = item.get("author", {}) or {}
+        media_url = ""
+        for m in (item.get("extendedEntities", {}) or {}).get("media", []):
+            u = m.get("media_url_https") or m.get("media_url", "")
+            if u:
+                media_url = u; break
+        hashtags = [h.get("text","").lower() for h in (item.get("entities",{}) or {}).get("hashtags",[]) if h.get("text")]
+        username = author.get("userName","") or author.get("username","")
+        return {
+            "id": str(item.get("id","")), "url": item.get("url","") or item.get("twitterUrl",""),
+            "text": (item.get("text","") or "")[:500], "created_at": item.get("createdAt",""),
+            "source_tag": source_tag, "lang": item.get("lang","ja"),
+            "views": item.get("viewCount",0) or 0, "likes": item.get("likeCount",0) or 0,
+            "retweets": item.get("retweetCount",0) or 0, "replies": item.get("replyCount",0) or 0,
+            "bookmarks": item.get("bookmarkCount",0) or 0, "hashtags": hashtags, "media_url": media_url,
+            "is_retweet": item.get("retweeted_tweet") is not None,
+            "author": {"username": username, "name": author.get("name",""),
+                       "followers": author.get("followers",0) or 0,
+                       "verified": author.get("isBlueVerified",False) or author.get("isVerified",False),
+                       "avatar": author.get("profilePicture","").replace("_normal.","_400x400."),
+                       "url": author.get("url","") or f"https://x.com/{username}"},
+        }
+    except Exception:
+        return None
+
+def fetch_twitter_from_apify():
+    """Apify 최신 Twitter 액터 실행 데이터 가져오기 (캐시: /tmp)"""
+    # /tmp 캐시 확인 — 당일치면 재사용
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    if os.path.exists(_TW_TMP):
+        try:
+            with open(_TW_TMP) as f:
+                cached = json.load(f)
+            if cached.get("date") == today:
+                return cached.get("items", [])
+        except Exception:
+            pass
+    if not APIFY_TOKEN:
+        return []
+    try:
+        # 최신 실행 가져오기
+        r = requests.get(
+            f"https://api.apify.com/v2/acts/{TWITTER_ACTOR_ID}/runs"
+            f"?token={APIFY_TOKEN}&limit=1&sortBy=startedAt&sortOrder=DESCENDING",
+            timeout=15)
+        r.raise_for_status()
+        runs = r.json().get("data", {}).get("items", [])
+        if not runs or runs[0].get("status") != "SUCCEEDED":
+            return []
+        dataset_id = runs[0]["defaultDatasetId"]
+        dr = requests.get(
+            f"https://api.apify.com/v2/datasets/{dataset_id}/items"
+            f"?token={APIFY_TOKEN}&format=json&limit=2000",
+            timeout=30)
+        dr.raise_for_status()
+        raw = dr.json()
+        seen, tweets = set(), []
+        for item in raw:
+            t = _normalize_tweet(item, "twitter-jp")
+            if t and t["id"] and t["id"] not in seen:
+                seen.add(t["id"]); tweets.append(t)
+        tweets.sort(key=lambda t: t["likes"] + t["retweets"]*3, reverse=True)
+        try:
+            with open(_TW_TMP, "w") as f:
+                json.dump({"date": today, "items": tweets}, f, ensure_ascii=False)
+        except Exception:
+            pass
+        return tweets
+    except Exception as e:
+        print(f"[Twitter/Apify] {e}")
+        return []
+
 @app.route("/api/x/dates")
 def api_x_dates():
     files = sorted(glob.glob(os.path.join(_SCRIPT_DIR, "twitter_*.json")), reverse=True)
-    return jsonify([os.path.basename(f).replace("twitter_","").replace(".json","") for f in files])
+    dates = [os.path.basename(f).replace("twitter_","").replace(".json","") for f in files]
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    if today not in dates:
+        dates.insert(0, today)
+    return jsonify(dates)
 
 @app.route("/api/x/data/<date>")
 def api_x_data_date(date):
+    # 로컬 파일 우선
     path = os.path.join(_SCRIPT_DIR, f"twitter_{date}.json")
-    if not os.path.exists(path):
-        return jsonify([])
-    with open(path, encoding="utf-8") as f:
-        return jsonify(json.load(f))
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            return jsonify(json.load(f))
+    # Apify 최신 데이터 폴백
+    tweets = fetch_twitter_from_apify()
+    return jsonify(tweets)
+
+@app.route("/api/cron/refresh", methods=["GET","POST"])
+def api_cron_refresh():
+    """Vercel Cron이 매일 9시에 호출 — 상품 데이터 갱신"""
+    items = fetch_from_apify(refresh=True)
+    cache = save_cache(items)
+    return jsonify({"ok": True, "count": len(items), "updated_at": cache["updated_at"]})
 
 @app.route("/api/run/twitter", methods=["POST"])
 def api_run_twitter():
@@ -541,25 +634,6 @@ def api_run_twitter():
     subprocess.Popen([sys.executable, script], stdout=log, stderr=subprocess.STDOUT)
     return jsonify({"ok": True})
 
-@app.route("/api/xhs/dates")
-def api_xhs_dates():
-    files = sorted(glob.glob(os.path.join(_SCRIPT_DIR, "xhs_data_*.json")), reverse=True)
-    return jsonify([os.path.basename(f).replace("xhs_data_","").replace(".json","") for f in files])
-
-@app.route("/api/xhs/data/<date>")
-def api_xhs_data_date(date):
-    path = os.path.join(_SCRIPT_DIR, f"xhs_data_{date}.json")
-    if not os.path.exists(path):
-        return jsonify([])
-    with open(path, encoding="utf-8") as f:
-        return jsonify(json.load(f))
-
-@app.route("/api/run/xhs", methods=["POST"])
-def api_run_xhs():
-    script = os.path.join(_SCRIPT_DIR, "kbeauty_xhs_scraper.py")
-    log    = open(os.path.join(_SCRIPT_DIR, "last_xhs_run.log"), "w")
-    subprocess.Popen([sys.executable, script], stdout=log, stderr=subprocess.STDOUT)
-    return jsonify({"ok": True})
 
 @app.route("/")
 def index():
@@ -820,10 +894,6 @@ select.fs:focus{border-color:var(--pink);background:#fff}
 #video-hub .plat-btn.active{background:white}
 #video-hub .plat-btn.tiktok-btn.active{color:#c97d8a}
 #video-hub .plat-btn.twitter-btn.active{color:#1d9bf0}
-#video-hub .plat-btn.xhs-btn.active{color:#ff2442}
-#video-hub .vh-subheader.xhs{background:linear-gradient(135deg,#ff6b7a 0%,#ff2442 100%)}
-#video-hub .vh-subheader.xhs .run-btn{color:#ff2442}
-#video-hub .vh-subheader.xhs .run-btn:hover{background:#fff0f2}
 #video-hub .run-btn{background:white;border:none;padding:8px 18px;
   border-radius:8px;font-weight:700;cursor:pointer;font-size:0.82rem;transition:all 0.2s}
 #video-hub .vh-subheader.tiktok .run-btn{color:#c97d8a}
@@ -1144,7 +1214,6 @@ select.fs:focus{border-color:var(--pink);background:#fff}
     <div class="platform-switch">
       <button class="plat-btn tiktok-btn active" id="btn-tiktok" onclick="vSwitchPlatform('tiktok')">🎵 TikTok</button>
       <button class="plat-btn twitter-btn" id="btn-twitter" onclick="vSwitchPlatform('twitter')">🇯🇵 JP Twitter</button>
-      <button class="plat-btn xhs-btn" id="btn-xhs" onclick="vSwitchPlatform('xhs')">📕 小红书</button>
     </div>
     <button class="run-btn" id="v-run-btn" onclick="vTriggerScrape()">Run New Scrape</button>
   </div>
@@ -1334,69 +1403,6 @@ select.fs:focus{border-color:var(--pink);background:#fff}
   </div>
 </div>
 
-<div id="v-xhs-hub" style="display:none">
-  <div class="v-layout">
-    <aside class="v-sidebar" style="border-right-color:#ffd0d5">
-      <div class="filter-section">
-        <span class="filter-label" style="color:#ff2442">카테고리</span>
-        <div class="date-btns" style="flex-direction:column;gap:5px">
-          <button class="date-btn active" data-cat="All" onclick="setXhsCat(this)">🌸 전체 K-Beauty</button>
-          <button class="date-btn" data-cat="스킨케어" onclick="setXhsCat(this)">💧 스킨케어</button>
-          <button class="date-btn" data-cat="메이크업" onclick="setXhsCat(this)">💄 메이크업</button>
-          <button class="date-btn" data-cat="헤어케어" onclick="setXhsCat(this)">💆 헤어케어</button>
-          <button class="date-btn" data-cat="종합" onclick="setXhsCat(this)">✨ 종합/바이럴</button>
-        </div>
-      </div>
-      <hr class="divider">
-      <div class="filter-section">
-        <span class="filter-label" style="color:#ff2442">검색</span>
-        <div class="filter-group">
-          <input type="text" id="xhsf-creator" placeholder="크리에이터 이름..." oninput="vApplyXhsFilters()">
-          <input type="text" id="xhsf-keyword" placeholder="제목 키워드..." oninput="vApplyXhsFilters()">
-        </div>
-      </div>
-      <hr class="divider">
-      <div class="filter-section">
-        <span class="filter-label" style="color:#ff2442">콘텐츠 타입</span>
-        <select id="xhsf-type" onchange="vApplyXhsFilters()">
-          <option value="">🌐 전체</option>
-          <option value="video">🎬 영상</option>
-          <option value="image">📷 이미지 노트</option>
-        </select>
-      </div>
-      <hr class="divider">
-      <div class="filter-section">
-        <span class="filter-label" style="color:#ff2442">정렬</span>
-        <select id="xhs-sort-select" onchange="vRenderXhsPosts()">
-          <option value="likes">❤️ 좋아요순</option>
-          <option value="comments">💬 댓글순</option>
-        </select>
-      </div>
-      <button class="clear-btn" onclick="vClearXhsFilters()">필터 초기화</button>
-    </aside>
-    <main class="v-main">
-      <div class="stats-bar" id="xhs-stats-bar">
-        <div class="stat-chip"><div class="n" id="xhss-posts" style="color:#ff2442">—</div><div class="l">Posts</div></div>
-        <div class="stat-chip"><div class="n" id="xhss-likes" style="color:#ff2442">—</div><div class="l">Total Likes</div></div>
-        <div class="stat-chip"><div class="n" id="xhss-creators" style="color:#ff2442">—</div><div class="l">Creators</div></div>
-        <div class="stat-chip"><div class="n" id="xhss-videos" style="color:#ff2442">—</div><div class="l">Videos</div></div>
-      </div>
-      <div class="tabs" id="xhs-tabs">
-        <button class="tab active" style="--ac:#ff2442" onclick="vSwitchXhsTab('posts', this)">🔥 Viral Posts</button>
-        <button class="tab" style="--ac:#ff2442" onclick="vSwitchXhsTab('creators', this)">👤 Top Creators</button>
-      </div>
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;background:white;padding:10px 16px;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.05)">
-        <span style="font-size:0.8rem;color:#888">데이터셋:</span>
-        <select id="xhs-date-pick" onchange="vApplyXhsFilters()" style="width:auto;flex:1;padding:6px 10px;font-size:0.82rem">
-          <option value="">— 전체 데이터셋 —</option>
-        </select>
-        <div id="xhs-result-count" style="margin-left:auto;font-size:0.8rem;color:#aaa"></div>
-      </div>
-      <div id="xhs-panel-posts"></div>
-      <div id="xhs-panel-creators" style="display:none"></div>
-    </main>
-  </div>
-</div>
 
 <div id="v-toast"></div>
 </div><!-- /video-hub -->
@@ -2244,14 +2250,6 @@ let vxDateRange = 'all';
 let vxActiveTab = 'tweets';
 let vxAllDates  = [];
 let vPlatform   = 'tiktok';
-let vxhsAllDates  = [];
-let vxhsAllData   = [];
-let vxhsFiltered  = [];
-let vxhsDateRange = 'all';
-let vxhsActiveTab = 'posts';
-let vxhsInitialized = false;
-let xhsCat    = 'All';
-let xhsPeriod = 'all';
 
 // ── Utilities ──
 function vFmt(n) {
@@ -2990,7 +2988,7 @@ function vRenderAudio() {
 async function vTriggerScrape() {
   const btn = document.getElementById('v-run-btn');
   btn.disabled = true; btn.textContent = 'Running...';
-  const endpoint = vPlatform === 'twitter' ? '/api/run/twitter' : vPlatform === 'xhs' ? '/api/run/xhs' : '/api/run';
+  const endpoint = vPlatform === 'twitter' ? '/api/run/twitter' : '/api/run';
   vToast('Scrape started — takes ~5-10 min. Page will refresh when done.', 10000);
   const r = await fetch(endpoint, { method: 'POST' });
   await r.json();
@@ -3002,14 +3000,6 @@ async function vTriggerScrape() {
         clearInterval(poll);
         btn.disabled = false; btn.textContent = 'Run New Scrape';
         vAllDates = dates; await vLoadAllData(); vToast('New TikTok data loaded!', 4000);
-      }
-    } else if (vPlatform === 'xhs') {
-      const dr = await fetch('/api/xhs/dates');
-      const dates = await dr.json();
-      if (dates[0] !== vxhsAllDates[0]) {
-        clearInterval(poll);
-        btn.disabled = false; btn.textContent = 'Run New Scrape';
-        vxhsAllDates = dates; await vLoadXhsAllData(); vToast('New XHS data loaded!', 4000);
       }
     } else {
       const dr = await fetch('/api/x/dates');
@@ -3029,28 +3019,19 @@ function vSwitchPlatform(p) {
   const hdr = document.getElementById('vh-subheader');
   const tiktokHub = document.getElementById('v-tiktok-layout');
   const twitterHub = document.getElementById('v-twitter-hub');
-  const xhsHub = document.getElementById('v-xhs-hub');
   document.getElementById('btn-tiktok').classList.toggle('active', p === 'tiktok');
   document.getElementById('btn-twitter').classList.toggle('active', p === 'twitter');
-  document.getElementById('btn-xhs').classList.toggle('active', p === 'xhs');
   tiktokHub.style.display = 'none';
   twitterHub.style.display = 'none';
-  xhsHub.style.display = 'none';
   if (p === 'tiktok') {
     hdr.className = 'vh-subheader tiktok';
     document.getElementById('vh-hub-title').textContent = 'K-Beauty TikTok Hub';
     tiktokHub.style.display = 'flex';
-  } else if (p === 'twitter') {
+  } else {
     hdr.className = 'vh-subheader twitter';
     document.getElementById('vh-hub-title').textContent = '🇯🇵 K-Beauty Japan X (Twitter) Hub';
     twitterHub.style.display = 'block';
     if (!vxAllDates.length) vInitTwitter();
-  } else {
-    hdr.className = 'vh-subheader xhs';
-    document.getElementById('vh-hub-title').textContent = 'K-Beauty 小红书 Hub';
-    document.getElementById('vh-last-updated').textContent = 'Loading...';
-    xhsHub.style.display = 'block';
-    if (!vxhsInitialized) { vInitXhs(); vxhsInitialized = true; }
   }
   document.getElementById('v-run-btn').textContent = 'Run New Scrape';
 }
@@ -3321,175 +3302,6 @@ function vHideVideoPreview() {
   vPreviewActive = false;
 }
 
-// ══════════════════════════════════════════════════════════════════════════
-// XHS (小红书) HUB
-// ══════════════════════════════════════════════════════════════════════════
-
-async function vInitXhs() {
-  const r = await fetch('/api/xhs/dates');
-  vxhsAllDates = await r.json();
-  const sel = document.getElementById('xhs-date-pick');
-  // keep "전체 데이터셋" option, append dates
-  sel.innerHTML = '<option value="">— 전체 데이터셋 —</option>';
-  vxhsAllDates.forEach(d => {
-    const o = document.createElement('option');
-    o.value = d; o.textContent = d; sel.appendChild(o);
-  });
-  if (vxhsAllDates.length) {
-    await vLoadXhsAllData();
-  } else {
-    document.getElementById('vh-last-updated').textContent = 'No XHS data yet — click Run New Scrape';
-    document.getElementById('xhs-panel-posts').innerHTML =
-      '<div class="empty"><div class="icon">📕</div><p>No 小红书 data yet.</p><p style="margin-top:8px">Click <b>Run New Scrape</b> to pull K-beauty posts.</p></div>';
-  }
-}
-
-async function vLoadXhsAllData() {
-  vxhsAllData = [];
-  const seen = new Set();
-  for (const date of vxhsAllDates) {
-    const r = await fetch('/api/xhs/data/' + date);
-    const items = await r.json();
-    items.forEach(p => {
-      if (!seen.has(p.id)) { seen.add(p.id); vxhsAllData.push({...p, _dataset: date}); }
-    });
-  }
-  document.getElementById('vh-last-updated').textContent =
-    vxhsAllData.length + ' posts across ' + vxhsAllDates.length + ' dataset(s) · Latest: ' + (vxhsAllDates[0]||'—');
-  vApplyXhsFilters();
-}
-
-function setXhsCat(btn) {
-  xhsCat = btn.dataset.cat;
-  document.querySelectorAll('#v-xhs-hub [data-cat]').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  vApplyXhsFilters();
-}
-
-function vApplyXhsFilters() {
-  const creator = document.getElementById('xhsf-creator').value.trim().toLowerCase();
-  const keyword = document.getElementById('xhsf-keyword').value.trim().toLowerCase();
-  const type    = document.getElementById('xhsf-type').value;
-  const dataset = document.getElementById('xhs-date-pick').value;
-  vxhsFiltered = vxhsAllData.filter(p => {
-    if (dataset && p._dataset !== dataset) return false;
-    if (xhsCat !== 'All' && p.category !== xhsCat) return false;
-    if (type && p.type !== type) return false;
-    if (creator && !(p.creator?.username||'').toLowerCase().includes(creator)) return false;
-    if (keyword && !(p.title||'').toLowerCase().includes(keyword)) return false;
-    return true;
-  });
-  vUpdateXhsStats();
-  vRenderXhsActiveTab();
-}
-
-function vClearXhsFilters() {
-  ['xhsf-creator','xhsf-keyword'].forEach(id => document.getElementById(id).value = '');
-  document.getElementById('xhsf-type').value = '';
-  document.getElementById('xhs-date-pick').value = '';
-  xhsCat = 'All';
-  document.querySelectorAll('#v-xhs-hub [data-cat]').forEach(b => b.classList.remove('active'));
-  const allBtn = document.querySelector('#v-xhs-hub [data-cat="All"]');
-  if (allBtn) allBtn.classList.add('active');
-  vApplyXhsFilters();
-}
-
-function vUpdateXhsStats() {
-  const totalLikes = vxhsFiltered.reduce((s,p) => s + (parseInt(p.stats?.likes)||0), 0);
-  const creators   = new Set(vxhsFiltered.map(p => p.creator?.userId).filter(Boolean)).size;
-  const videos     = vxhsFiltered.filter(p => p.type === 'video').length;
-  document.getElementById('xhss-posts').textContent    = vFmt(vxhsFiltered.length);
-  document.getElementById('xhss-likes').textContent    = vFmt(totalLikes);
-  document.getElementById('xhss-creators').textContent = creators;
-  document.getElementById('xhss-videos').textContent   = videos;
-  document.getElementById('xhs-result-count').textContent = vxhsFiltered.length + ' posts';
-}
-
-function vSwitchXhsTab(tab, btn) {
-  vxhsActiveTab = tab;
-  document.querySelectorAll('#xhs-tabs .tab').forEach(t => t.classList.remove('active'));
-  btn.classList.add('active');
-  vRenderXhsActiveTab();
-}
-
-function vRenderXhsActiveTab() {
-  document.getElementById('xhs-panel-posts').style.display    = vxhsActiveTab === 'posts'    ? 'block' : 'none';
-  document.getElementById('xhs-panel-creators').style.display = vxhsActiveTab === 'creators' ? 'block' : 'none';
-  if (vxhsActiveTab === 'posts')    vRenderXhsPosts();
-  if (vxhsActiveTab === 'creators') vRenderXhsCreators();
-}
-
-function vRenderXhsPosts() {
-  const el = document.getElementById('xhs-panel-posts');
-  if (!vxhsFiltered.length) {
-    el.innerHTML = '<div class="empty"><div class="icon">📕</div><p>필터에 맞는 포스트가 없어요.</p></div>';
-    return;
-  }
-  const sortBy = document.getElementById('xhs-sort-select').value;
-  const sorted = [...vxhsFiltered].sort((a, b) => {
-    if (sortBy === 'comments') return (parseInt(b.stats?.comments)||0) - (parseInt(a.stats?.comments)||0);
-    return (parseInt(b.stats?.likes)||0) - (parseInt(a.stats?.likes)||0);
-  });
-  const catColor = {'스킨케어':'#4caf9e','메이크업':'#e91e8c','헤어케어':'#9c5bb5','종합':'#ff7043'};
-  el.innerHTML = '<div class="video-grid">' + sorted.slice(0, 60).map((p, i) => {
-    const likes    = vFmt(parseInt(p.stats?.likes)||0);
-    const comments = vFmt(parseInt(p.stats?.comments)||0);
-    const cover    = p.cover || '';
-    const creator  = p.creator?.username || '—';
-    const avatar   = p.creator?.avatar || '';
-    const typeIcon = p.type === 'video' ? '🎬' : '📷';
-    const catBadge = p.category
-      ? '<span style="background:' + (catColor[p.category]||'#999') + ';color:white;font-size:0.65rem;padding:2px 7px;border-radius:10px;font-weight:700">' + vEsc(p.category) + '</span>'
-      : '';
-    const kwBadge = p.source_tag
-      ? '<span style="background:#f3e5ff;color:#9c5bb5;font-size:0.65rem;padding:2px 7px;border-radius:10px">#' + vEsc(p.source_tag) + '</span>'
-      : '';
-    return '<div class="video-card">' +
-      (cover
-        ? '<a href="' + vEsc(p.url||'#') + '" target="_blank" class="card-thumb"><img src="' + vEsc(cover) + '" loading="lazy" onerror="this.parentElement.style.display=\'none\'"><div class="thumb-overlay"></div><div class="thumb-views" style="background:rgba(255,36,66,.75)">' + typeIcon + ' ' + likes + ' ❤️</div></a>'
-        : '') +
-      '<div class="card-body">' +
-        '<div class="card-rank">#' + (i+1) + ' · ' + vEsc(p.source_tag||'xhs') + '</div>' +
-        '<div class="card-creator">' +
-          (avatar
-            ? '<img class="creator-avatar" src="' + vEsc(avatar) + '" onerror="this.style.display=\'none\'" loading="lazy">'
-            : '<div class="creator-avatar" style="display:flex;align-items:center;justify-content:center;font-size:14px;color:#ddd">👤</div>') +
-          '<div class="creator-info"><span style="font-weight:700">' + vEsc(creator) + '</span></div></div>' +
-        '<div class="card-caption">' + vEsc((p.title||'').slice(0, 100)) + '</div>' +
-        '<div class="metrics-grid">' +
-          '<div class="metric"><div class="mv" style="color:#ff2442">' + likes + '</div><div class="ml">좋아요</div></div>' +
-          '<div class="metric"><div class="mv">' + comments + '</div><div class="ml">댓글</div></div>' +
-        '</div>' +
-        '<div class="tags-row" style="gap:4px;margin-top:6px">' + catBadge + ' ' + kwBadge + '</div>' +
-        '<div class="card-footer"><a class="watch-btn" href="' + vEsc(p.url||'#') + '" target="_blank" style="background:#ff2442">小红书에서 보기 →</a></div>' +
-      '</div></div>';
-  }).join('') + '</div>';
-}
-
-function vRenderXhsCreators() {
-  const el = document.getElementById('xhs-panel-creators');
-  const stats = {};
-  vxhsFiltered.forEach(p => {
-    const uid = p.creator?.userId || p.creator?.username || '?';
-    if (!stats[uid]) stats[uid] = { name: p.creator?.username || p.creator?.nickName || uid, avatar: p.creator?.avatar||'', posts:0, likes:0 };
-    stats[uid].posts++;
-    stats[uid].likes += parseInt(p.stats?.likes)||0;
-  });
-  const sorted = Object.values(stats).sort((a,b) => b.likes - a.likes).slice(0,30);
-  if (!sorted.length) { el.innerHTML = '<div class="empty"><div class="icon">👤</div><p>No creator data.</p></div>'; return; }
-  el.innerHTML = `<div class="creators-table-wrap"><table>
-    <thead><tr><th>#</th><th>Creator</th><th>Posts</th><th>Total Likes</th></tr></thead>
-    <tbody>${sorted.map((c,i) => `<tr>
-      <td style="color:#ff2442;font-weight:700">${i+1}</td>
-      <td><div style="display:flex;align-items:center;gap:8px">
-        ${c.avatar?`<img src="${vEsc(c.avatar)}" style="width:28px;height:28px;border-radius:50%;object-fit:cover">`:'<div style="width:28px;height:28px;border-radius:50%;background:#ffd0d5;display:flex;align-items:center;justify-content:center;font-size:0.8rem">👤</div>'}
-        <span style="font-weight:600">${vEsc(c.name)}</span>
-      </div></td>
-      <td>${c.posts}</td>
-      <td style="color:#ff2442;font-weight:700">❤️ ${vFmt(c.likes)}</td>
-    </tr>`).join('')}</tbody>
-  </table></div>`;
-}
 </script>
 </body>
 </html>
