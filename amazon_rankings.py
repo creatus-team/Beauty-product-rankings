@@ -5,7 +5,7 @@ Amazon Beauty Rankings Dashboard
 - Run: python3 amazon_rankings.py
 """
 
-from flask import Flask, jsonify, render_template_string, request
+from flask import Flask, jsonify, render_template_string, request, make_response
 import json, os, requests, glob, subprocess, sys
 from datetime import datetime
 try:
@@ -420,8 +420,21 @@ def detect_country(item):
                 return info
     return {"code": "US", "flag": "🇺🇸", "name": "United States"}
 
+def _load_bundled_by_country(codes):
+    """번들 캐시에서 특정 country_code 아이템만 반환"""
+    if not os.path.exists(BUNDLED_CACHE):
+        return []
+    try:
+        with open(BUNDLED_CACHE, "r", encoding="utf-8") as f:
+            bundled = json.load(f)
+        return [i for i in bundled.get("items", []) if i.get("_country_code") in codes]
+    except Exception:
+        return []
+
 def fetch_from_apify(refresh=False):
     all_items = []
+    # Amazon (US/UK/JP) — Apify 실패 시 번들 캐시 폴백
+    amazon_items = []
     for label, run_id in ACTOR_RUNS.items():
         url = (f"https://api.apify.com/v2/actor-runs/{run_id}/dataset/items"
                f"?token={APIFY_TOKEN}&limit=500")
@@ -437,9 +450,13 @@ def fetch_from_apify(refresh=False):
                 item["_country_name"] = country["name"]
                 item["_price_value"] = price_raw.get("value") if isinstance(price_raw, dict) else None
                 item["_price_currency"] = price_raw.get("currency", "$") if isinstance(price_raw, dict) else "$"
-            all_items.extend(items)
+            amazon_items.extend(items)
         except Exception as e:
             print(f"[Apify] {label} ({run_id}) failed: {e}")
+    if not amazon_items:
+        amazon_items = _load_bundled_by_country({"US", "UK", "JP"})
+        print(f"[Amazon] Apify unavailable — loaded {len(amazon_items)} items from bundled cache")
+    all_items.extend(amazon_items)
     # YesStyle 추가
     ys_items = fetch_yesstyle()
     print(f"[YesStyle] fetched {len(ys_items)} items")
@@ -450,18 +467,16 @@ def fetch_from_apify(refresh=False):
     all_items.extend(oy_items)
     # Qoo10 Japan 추가 (Playwright 필요 — Vercel에서는 번들 캐시 폴백)
     qj_items = fetch_qoo10()
-    if not qj_items and os.path.exists(BUNDLED_CACHE):
-        try:
-            with open(BUNDLED_CACHE, "r", encoding="utf-8") as f:
-                bundled = json.load(f)
-            qj_items = [i for i in bundled.get("items", []) if i.get("_country_code") == "QJ"]
-            print(f"[Qoo10] Playwright unavailable — loaded {len(qj_items)} items from bundled cache")
-        except Exception:
-            pass
+    if not qj_items:
+        qj_items = _load_bundled_by_country({"QJ"})
+        print(f"[Qoo10] Playwright unavailable — loaded {len(qj_items)} items from bundled cache")
     print(f"[Qoo10] fetched {len(qj_items)} items")
     all_items.extend(qj_items)
-    # TikTok Shop 추가
+    # TikTok Shop 추가 — 실패 시 번들 캐시 폴백
     tt_items = fetch_tiktok()
+    if not tt_items:
+        tt_items = _load_bundled_by_country({"TT"})
+        print(f"[TikTok] Apify unavailable — loaded {len(tt_items)} items from bundled cache")
     all_items.extend(tt_items)
     return all_items
 
@@ -483,7 +498,60 @@ def save_cache(data):
             json.dump(cache, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"[cache] write failed (expected on Vercel): {e}")
+    save_ranking_snapshot(data)
     return cache
+
+def _item_uid(item):
+    asin    = item.get("asin") or ""
+    country = item.get("_country_code", "")
+    return f"{country}_{asin}" if asin else f"{country}_{(item.get('name') or '')[:40]}"
+
+def _snap_paths(date_str):
+    """Return list of candidate snapshot paths (writable first, then bundled)."""
+    paths = [f"/tmp/rankings_{date_str}.json"]
+    local = os.path.join(_SCRIPT_DIR, f"rankings_{date_str}.json")
+    if local not in paths:
+        paths.append(local)
+    return paths
+
+def save_ranking_snapshot(items):
+    from datetime import timezone
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    # Don't overwrite if already saved today in any location
+    if any(os.path.exists(p) for p in _snap_paths(today)):
+        return
+    snap = [{"id": _item_uid(i), "name": i.get("name",""), "rank": i.get("position",0),
+             "category": i.get("categoryName",""), "country": i.get("_country_code",""),
+             "flag": i.get("_country_flag","")} for i in items]
+    for path in _snap_paths(today):
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"date": today, "items": snap}, f, ensure_ascii=False)
+            print(f"[snapshot] saved {today} → {path}")
+            return
+        except Exception as e:
+            print(f"[snapshot] write failed {path}: {e}")
+
+def load_ranking_snapshot(date_str):
+    for path in _snap_paths(date_str):
+        if os.path.exists(path):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    return json.load(f).get("items", [])
+            except Exception:
+                pass
+    return None
+
+def list_snapshot_dates():
+    seen = set()
+    dates = []
+    for pattern in ["/tmp/rankings_*.json", os.path.join(_SCRIPT_DIR, "rankings_*.json")]:
+        for p in glob.glob(pattern):
+            d = os.path.basename(p).replace("rankings_","").replace(".json","")
+            if d not in seen:
+                seen.add(d)
+                dates.append(d)
+    return sorted(dates, reverse=True)
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
@@ -499,7 +567,85 @@ def api_data():
     if not cache:
         items = fetch_from_apify()
         cache = save_cache(items)
+    else:
+        # 오늘 스냅샷이 없으면 캐시 기반으로 즉시 저장
+        save_ranking_snapshot(cache.get("items", []))
     return jsonify(cache)
+
+@app.route("/api/rankings/changes")
+def api_rankings_changes():
+    from datetime import date as _date, timedelta
+    period = request.args.get("period", "1d")
+    period_days = {"1d": 1, "1w": 7, "30d": 30, "90d": 90}.get(period, 1)
+    country_filter = request.args.get("country", "")
+
+    cache = load_cache()
+    if not cache:
+        return jsonify({"error": "no data", "changes": []})
+
+    current_items = cache.get("items", [])
+    today_str = datetime.utcnow().strftime("%Y-%m-%d")
+
+    # 현재 순위를 딕셔너리로
+    current = {}
+    for item in current_items:
+        uid = _item_uid(item)
+        current[uid] = {
+            "id": uid,
+            "name": item.get("name", ""),
+            "rank": item.get("position", 0),
+            "category": item.get("categoryName", ""),
+            "country": item.get("_country_code", ""),
+            "flag": item.get("_country_flag", ""),
+            "thumb": item.get("thumbnailUrl", ""),
+        }
+
+    # 비교 날짜 = target 이하의 가장 최근 스냅샷
+    target_date = (_date.today() - timedelta(days=period_days)).isoformat()
+    snap_dates = list_snapshot_dates()
+    compare_date = None
+    prev = {}
+    for d in snap_dates:
+        if d <= target_date:
+            compare_date = d
+            snap_items = load_ranking_snapshot(d)
+            if snap_items:
+                for it in snap_items:
+                    prev[it["id"]] = it
+            break
+
+    if not prev:
+        return jsonify({
+            "period": period, "compare_date": None,
+            "available_dates": snap_dates,
+            "message": f"비교 데이터 없음 ({period_days}일 이전 스냅샷 필요)",
+            "changes": []
+        })
+
+    changes = []
+    for uid, cur in current.items():
+        if country_filter and cur["country"] != country_filter:
+            continue
+        if uid in prev:
+            delta = prev[uid]["rank"] - cur["rank"]  # 양수 = 순위 상승 (숫자 감소)
+            if delta != 0:
+                changes.append({**cur, "prev_rank": prev[uid]["rank"], "change": delta, "is_new": False})
+        else:
+            changes.append({**cur, "prev_rank": None, "change": None, "is_new": True})
+
+    # 신규 제외 최대 상승/하락 각 30개 + 신규 20개
+    risen  = sorted([c for c in changes if not c["is_new"] and c["change"] > 0], key=lambda x: -x["change"])[:30]
+    fallen = sorted([c for c in changes if not c["is_new"] and c["change"] < 0], key=lambda x: x["change"])[:30]
+    new    = [c for c in changes if c["is_new"]][:20]
+
+    return jsonify({
+        "period": period,
+        "current_date": today_str,
+        "compare_date": compare_date,
+        "risen": risen,
+        "fallen": fallen,
+        "new": new,
+    })
 
 @app.route("/api/dates")
 def api_dates():
@@ -629,133 +775,156 @@ def api_cron_refresh():
 
 @app.route("/api/trends/timeline")
 def api_trends_timeline():
-    """날짜별 Twitter 키워드 인게이지먼트 타임라인"""
-    files = sorted(glob.glob(os.path.join(_SCRIPT_DIR, "twitter_*.json")))
-    timeline = {}
-    for fpath in files:
-        date = os.path.basename(fpath).replace("twitter_","").replace(".json","")
-        try:
-            with open(fpath, encoding="utf-8") as f:
-                tweets = json.load(f)
-        except Exception:
+    """Product-based: K-beauty 성분·타입 키워드별 마켓 상품 수 분포"""
+    KBEAUTY_KWS = [
+        "niacinamide","ceramide","hyaluronic","retinol","peptide",
+        "snail","centella","cica","propolis","mugwort",
+        "vitamin c","aha","bha","sunscreen","spf",
+        "essence","ampoule","serum","sheet mask","toner",
+        "collagen","ferment","galactomyces","tranexamic","bakuchiol",
+    ]
+    KW_KO = {
+        "niacinamide":"나이아신아마이드","ceramide":"세라마이드","hyaluronic":"히알루론산",
+        "retinol":"레티놀","peptide":"펩타이드","snail":"달팽이뮤신",
+        "centella":"센텔라","cica":"시카","propolis":"프로폴리스","mugwort":"쑥",
+        "vitamin c":"비타민C","aha":"AHA","bha":"BHA","sunscreen":"선크림","spf":"SPF",
+        "essence":"에센스","ampoule":"앰플","serum":"세럼","sheet mask":"시트마스크","toner":"토너",
+        "collagen":"콜라겐","ferment":"발효","galactomyces":"갈락토미세스",
+        "tranexamic":"트라넥사믹","bakuchiol":"바쿠치올",
+    }
+    KW_CAT = {
+        "niacinamide":"성분","ceramide":"성분","hyaluronic":"성분","retinol":"성분",
+        "peptide":"성분","snail":"성분","centella":"성분","cica":"성분",
+        "propolis":"성분","mugwort":"성분","vitamin c":"성분","aha":"성분","bha":"성분",
+        "tranexamic":"성분","bakuchiol":"성분","collagen":"성분",
+        "ferment":"성분","galactomyces":"성분",
+        "sunscreen":"기능성","spf":"기능성",
+        "essence":"제형","ampoule":"제형","serum":"제형","sheet mask":"제형","toner":"제형",
+    }
+    MARKETS = ["US","UK","JP","OY","TT","YS","QJ"]
+    cache = load_cache()
+    items = cache.get("items", [])
+    data = {kw: {m: 0 for m in MARKETS} for kw in KBEAUTY_KWS}
+    for item in items:
+        market = item.get("_country_code", "")
+        if market not in MARKETS:
             continue
-        day = {}
-        for t in tweets:
-            tag = t.get("source_tag") or "other"
-            if tag not in day:
-                day[tag] = {"tweets": 0, "likes": 0, "views": 0, "retweets": 0, "buzz": 0}
-            likes    = int(t.get("likes", 0) or 0)
-            views    = int(t.get("views", 0) or 0)
-            retweets = int(t.get("retweets", 0) or 0)
-            day[tag]["tweets"]   += 1
-            day[tag]["likes"]    += likes
-            day[tag]["views"]    += views
-            day[tag]["retweets"] += retweets
-            day[tag]["buzz"]     += likes * 2 + retweets * 5 + views // 100
-        timeline[date] = day
-    return jsonify(timeline)
+        text = (item.get("name","") or "").lower() + " " + (item.get("categoryFullName","") or "").lower()
+        for kw in KBEAUTY_KWS:
+            if kw in text:
+                data[kw][market] += 1
+    result = {kw: counts for kw, counts in data.items() if sum(counts.values()) > 0}
+    return jsonify({
+        "keywords": list(result.keys()),
+        "markets": MARKETS,
+        "data": result,
+        "labels": KW_KO,
+        "categories": KW_CAT,
+    })
 
 
 @app.route("/api/trends/creators")
 def api_trends_creators():
-    """크리에이터 초기 신호 감지 — 팔로워 적은데 인게이지먼트 높은 크리에이터"""
+    """크리에이터 초기 신호 감지 — TikTok 팔로워 적은데 인게이지먼트 높은 크리에이터"""
     BEAUTY_TERMS = {
-        "韓国","korea","kbeauty","k-beauty","kビューティー","cosrx","anua","laneige",
-        "romand","skin1004","3ce","innisfree","missha","skincare","スキンケア","コスメ",
-        "化粧品","美容","美白","保湿","毛穴","ガラス肌","serum","toner","moisturizer",
-        "sunscreen","niacinamide","ceramide","retinol","hyaluronic","韓国コスメ",
-        "韓国スキンケア","コリアンビューティー","beauty of joseon","oliveyoung",
-        "k beauty","korean skincare","skinbarrier","cica","pdrn","aha","bha",
-        "スキンケアルーティン","ルーティン","美肌",
+        "kbeauty","k-beauty","koreanbeauty","koreanskincare","korean skincare",
+        "cosrx","anua","laneige","romand","skin1004","3ce","innisfree","missha",
+        "skincare","serum","toner","moisturizer","sunscreen","niacinamide",
+        "ceramide","retinol","hyaluronic","beauty of joseon","oliveyoung",
+        "kbeautyroutine","kbeautyreview","viralkbeauty","kbeautyhaul",
+        "skinbarrier","cica","pdrn","aha","bha","peptide","snail","centella",
+        "skintok","glasskin","koreanskincareroutine",
     }
-    files = sorted(glob.glob(os.path.join(_SCRIPT_DIR, "twitter_*.json")), reverse=True)[:14]
+    files = sorted(glob.glob(os.path.join(_SCRIPT_DIR, "data_*.json")), reverse=True)[:14]
     creators = {}
 
     for fpath in files:
         try:
             with open(fpath, encoding="utf-8") as f:
-                tweets = json.load(f)
+                videos = json.load(f)
         except Exception:
             continue
-        for t in tweets:
-            if t.get("is_retweet"):
-                continue
-            author = t.get("author") or {}
-            username = (author.get("username") or "").strip()
+        for v in videos:
+            creator = v.get("creator") or {}
+            username = (creator.get("username") or "").strip()
             if not username:
                 continue
-            followers = int(author.get("followers") or 0)
+            followers = int(creator.get("followers") or 0)
             if followers < 100 or followers > 100_000:
                 continue
 
-            # 트윗 텍스트/해시태그 자체에 뷰티 관련 단어가 있는 것만 포함
-            text_lower = (t.get("text") or "").lower()
-            tags_lower = " ".join(t.get("hashtags") or []).lower()
-            beauty_check = text_lower + " " + tags_lower
+            caption = (v.get("caption") or "").lower()
+            tags_lower = " ".join(v.get("hashtags") or []).lower()
+            beauty_check = caption + " " + tags_lower
             if not any(term in beauty_check for term in BEAUTY_TERMS):
                 continue
 
-            likes    = int(t.get("likes")    or 0)
-            retweets = int(t.get("retweets") or 0)
-            replies  = int(t.get("replies")  or 0)
-            views    = int(t.get("views")    or 0)
-            engagement = likes + retweets * 3 + replies * 2
-            er = engagement / followers * 100
+            stats    = v.get("stats") or {}
+            likes    = int(stats.get("likes",    0) or 0)
+            comments = int(stats.get("comments", 0) or 0)
+            shares   = int(stats.get("shares",   0) or 0)
+            saves    = int(stats.get("saves",    0) or 0)
+            views    = int(stats.get("views",    0) or 0)
+            engagement = likes + comments * 2 + shares * 3 + saves * 2
+            # TikTok은 뷰 기준 ER이 더 의미있음 (알고리즘 배포 특성)
+            er = engagement / max(views, 1) * 100
 
             if username not in creators:
                 creators[username] = {
-                    "username": username,
-                    "name": author.get("name") or username,
-                    "followers": followers,
-                    "verified": bool(author.get("verified")),
-                    "avatar": author.get("avatar") or "",
-                    "url": author.get("url") or f"https://x.com/{username}",
-                    "tweet_count": 0,
+                    "username":    username,
+                    "name":        creator.get("nickname") or username,
+                    "followers":   followers,
+                    "verified":    bool(creator.get("verified")),
+                    "avatar":      creator.get("avatar") or "",
+                    "url":         creator.get("url") or f"https://www.tiktok.com/@{username}",
+                    "video_count": 0,
                     "total_engagement": 0,
-                    "total_er": 0.0,
+                    "total_er":    0.0,
                     "total_views": 0,
-                    "keywords": [],
-                    "tweets": [],
+                    "keywords":    [],
+                    "videos":      [],
                 }
             c = creators[username]
-            c["tweet_count"] += 1
+            c["video_count"] += 1
             c["total_engagement"] += engagement
             c["total_er"] += er
             c["total_views"] += views
-            tag = t.get("source_tag") or ""
+            tag = v.get("source_tag") or ""
             if tag and tag not in c["keywords"]:
                 c["keywords"].append(tag)
-            c["tweets"].append({
-                "text":       (t.get("text") or "")[:200],
+            c["videos"].append({
+                "caption":    (v.get("caption") or "")[:200],
                 "likes":      likes,
-                "retweets":   retweets,
-                "replies":    replies,
+                "comments":   comments,
+                "shares":     shares,
+                "saves":      saves,
                 "views":      views,
-                "url":        t.get("url") or "",
+                "url":        v.get("url") or "",
+                "cover":      v.get("cover") or "",
                 "engagement": engagement,
             })
 
     result = []
     for c in creators.values():
-        if c["tweet_count"] < 1:
+        if c["video_count"] < 1:
             continue
-        avg_er = c["total_er"] / c["tweet_count"]
+        avg_er = c["total_er"] / c["video_count"]
         discovery_bonus = 1 + (1 - min(c["followers"] / 50_000, 1)) * 0.6
         signal = round(avg_er * discovery_bonus, 2)
-        top_tweet = sorted(c["tweets"], key=lambda x: x["engagement"], reverse=True)[0]
+        top_video = sorted(c["videos"], key=lambda x: x["engagement"], reverse=True)[0]
         result.append({
-            "username":     c["username"],
-            "name":         c["name"],
-            "followers":    c["followers"],
-            "verified":     c["verified"],
-            "avatar":       c["avatar"],
-            "url":          c["url"],
-            "tweet_count":  c["tweet_count"],
-            "avg_er":       round(avg_er, 2),
-            "total_views":  c["total_views"],
-            "signal_score": signal,
-            "keywords":     c["keywords"][:6],
-            "top_tweet":    top_tweet,
+            "username":    c["username"],
+            "name":        c["name"],
+            "followers":   c["followers"],
+            "verified":    c["verified"],
+            "avatar":      c["avatar"],
+            "url":         c["url"],
+            "video_count": c["video_count"],
+            "avg_er":      round(avg_er, 2),
+            "total_views": c["total_views"],
+            "signal_score":signal,
+            "keywords":    c["keywords"][:6],
+            "top_video":   top_video,
         })
 
     result.sort(key=lambda x: x["signal_score"], reverse=True)
@@ -764,92 +933,49 @@ def api_trends_creators():
 
 @app.route("/api/trends/gaps")
 def api_trends_gaps():
-    """공백 시장 탐지 — 소셜 버즈 높은데 상품 희박한 키워드"""
-    KBEAUTY_TERMS = {
-        "韓国","kbeauty","k-beauty","kビューティー","コリアンビューティー",
-        "cosrx","anua","laneige","romand","3ce","innisfree","missha","skin1004",
-        "beauty of joseon","cerave","セラミド","ナイアシンアミド","レチノール",
-        "ヒアルロン酸","パンテノール","ビタミンc","スキンケア","コスメ","化粧品",
-        "美容","美白","保湿","毛穴","ガラス肌","韓国コスメ","韓国スキンケア",
-        "niacinamide","ceramide","retinol","hyaluronic","panthenol","sunscreen",
-        "toner","serum","moisturizer","exfoliant","bha","aha","pdrn","cica",
-        "올리브영","韓国化粧品","oliveyoung","skincare","skinbarrier",
-    }
-    # 최근 14개 파일에서 버즈 집계
-    files = sorted(glob.glob(os.path.join(_SCRIPT_DIR, "twitter_*.json")), reverse=True)[:14]
-    tag_buzz = {}
-    htag_buzz = {}
-    for fpath in files:
-        try:
-            with open(fpath, encoding="utf-8") as f:
-                tweets = json.load(f)
-        except Exception:
-            continue
-        for t in tweets:
-            likes    = int(t.get("likes", 0) or 0)
-            views    = int(t.get("views", 0) or 0)
-            retweets = int(t.get("retweets", 0) or 0)
-            buzz = likes * 2 + retweets * 5 + views // 100
-            tag = t.get("source_tag") or ""
-            if tag:
-                if tag not in tag_buzz:
-                    tag_buzz[tag] = {"buzz":0,"tweets":0,"likes":0,"views":0}
-                tag_buzz[tag]["buzz"]   += buzz
-                tag_buzz[tag]["tweets"] += 1
-                tag_buzz[tag]["likes"]  += likes
-                tag_buzz[tag]["views"]  += views
-            for h in (t.get("hashtags") or []):
-                h = h.lower().strip()
-                if len(h) < 3 or len(h) > 30:
-                    continue
-                if not any(term in h for term in KBEAUTY_TERMS) and h not in KBEAUTY_TERMS:
-                    continue
-                if h not in htag_buzz:
-                    htag_buzz[h] = {"buzz":0,"tweets":0,"likes":0,"views":0}
-                htag_buzz[h]["buzz"]   += buzz
-                htag_buzz[h]["tweets"] += 1
-                htag_buzz[h]["likes"]  += likes
-                htag_buzz[h]["views"]  += views
-
-    # 아마존/TikTok 상품 풀텍스트
-    product_text = ""
-    try:
-        cpath = CACHE_FILE if os.path.exists(CACHE_FILE) else BUNDLED_CACHE
-        with open(cpath, encoding="utf-8") as f:
-            product_text = " ".join(
-                (i.get("name","") or "").lower()
-                for i in json.load(f).get("items",[])
-            )
-    except Exception:
-        pass
-
+    """Product-based: 아시아(OY·JP·QJ) vs 서양(US·UK·TT·YS) 성분 공백 탐지"""
+    KBEAUTY_KWS = [
+        "niacinamide","ceramide","hyaluronic","retinol","peptide",
+        "snail","centella","cica","propolis","mugwort",
+        "vitamin c","aha","bha","sunscreen","spf",
+        "essence","ampoule","serum","sheet mask","toner",
+        "collagen","ferment","galactomyces","tranexamic","bakuchiol",
+        "azelaic","bifida","pdrn","madecassoside","phytosphingosine",
+    ]
+    ASIAN = {"OY","JP","QJ"}
+    WEST  = {"US","UK","TT","YS"}
+    cache = load_cache()
+    items = cache.get("items", [])
+    data = {kw: {"asian":0,"western":0,"asian_d":{},"western_d":{}} for kw in KBEAUTY_KWS}
+    for item in items:
+        market = item.get("_country_code","")
+        text = (item.get("name","") or "").lower() + " " + (item.get("categoryFullName","") or "").lower()
+        for kw in KBEAUTY_KWS:
+            if kw in text:
+                d = data[kw]
+                if market in ASIAN:
+                    d["asian"] += 1
+                    d["asian_d"][market] = d["asian_d"].get(market, 0) + 1
+                elif market in WEST:
+                    d["western"] += 1
+                    d["western_d"][market] = d["western_d"].get(market, 0) + 1
     gaps = []
-    def score_entry(kw, data, prefix=""):
-        if data["tweets"] < 2:
-            return None
-        kw_lower = kw.lower()
-        hits = product_text.count(kw_lower)
-        gap = data["buzz"] / (1 + hits * 15)
-        return {
-            "keyword": prefix + kw,
-            "type": "hashtag" if prefix == "#" else "keyword",
-            "buzz": data["buzz"],
-            "tweets": data["tweets"],
-            "likes": data["likes"],
-            "views": data["views"],
-            "product_hits": hits,
-            "gap_score": round(gap, 1),
-        }
-
-    for kw, data in tag_buzz.items():
-        e = score_entry(kw, data)
-        if e: gaps.append(e)
-    for kw, data in htag_buzz.items():
-        e = score_entry(kw, data, prefix="#")
-        if e: gaps.append(e)
-
+    for kw, d in data.items():
+        total = d["asian"] + d["western"]
+        if total < 1:
+            continue
+        gap_score = d["asian"] / (1 + d["western"] * 1.5)
+        gaps.append({
+            "keyword":       kw,
+            "asian_count":   d["asian"],
+            "western_count": d["western"],
+            "total_count":   total,
+            "asian_detail":  d["asian_d"],
+            "western_detail":d["western_d"],
+            "gap_score":     round(gap_score, 2),
+        })
     gaps.sort(key=lambda x: x["gap_score"], reverse=True)
-    return jsonify(gaps[:40])
+    return jsonify(gaps)
 
 
 @app.route("/api/run/twitter", methods=["POST"])
@@ -860,9 +986,119 @@ def api_run_twitter():
     return jsonify({"ok": True})
 
 
+@app.route("/api/trends/brands")
+def api_trends_brands():
+    """바이럴 뷰티 영상(TikTok)에서 언급된 K-beauty 브랜드 분석"""
+    BRANDS = [
+        "cosrx","anua","laneige","romand","skin1004","3ce","innisfree","missha",
+        "beauty of joseon","torriden","isntree","klairs","round lab","purito",
+        "tirtir","numbuzin","mary&may","vt cosmetics","mediheal","beplain",
+        "biodance","mixsoon","haruharu","axis-y","rovectin","some by mi",
+        "dr.jart","etude","tony moly","nature republic","skinfood","medicube",
+        "fwee","pyunkang","i'm from","papa recipe","d'alba","aestura",
+        "holika holika","neogen","makeheal","by wishtrend","manyo","tocobo",
+        "needly","glow recipe","dear klairs","ma:nyo","oliveyoung",
+    ]
+    files = sorted(glob.glob(os.path.join(_SCRIPT_DIR, "data_*.json")), reverse=True)[:14]
+    all_videos = []
+    for fpath in files:
+        date_str = os.path.basename(fpath).replace("data_","").replace(".json","")
+        try:
+            with open(fpath, encoding="utf-8") as f:
+                for v in json.load(f):
+                    v["_fd"] = date_str
+                    all_videos.append(v)
+        except Exception:
+            continue
+
+    if not all_videos:
+        return jsonify([])
+
+    dates = sorted({v["_fd"] for v in all_videos}, reverse=True)
+    recent = set(dates[:4]) if len(dates) >= 4 else set(dates)
+
+    brand_data = {b: {"brand": b, "count": 0, "recent_count": 0,
+                      "total_views": 0, "total_eng": 0, "top_video": None}
+                  for b in BRANDS}
+
+    for v in all_videos:
+        cap  = (v.get("caption") or "").lower()
+        tags = " ".join(v.get("hashtags") or []).lower()
+        text = cap + " " + tags
+        stats = v.get("stats") or {}
+        views = int(stats.get("views", 0) or 0)
+        eng   = int(v.get("engagement", 0) or 0)
+        is_recent = v["_fd"] in recent
+        for b in BRANDS:
+            if b in text:
+                d = brand_data[b]
+                d["count"] += 1
+                d["total_views"] += views
+                d["total_eng"]   += eng
+                if is_recent:
+                    d["recent_count"] += 1
+                tv = d["top_video"]
+                if tv is None or views > tv["views"]:
+                    cr = v.get("creator") or {}
+                    d["top_video"] = {
+                        "url":     v.get("url",""),
+                        "caption": (v.get("caption") or "")[:120],
+                        "cover":   v.get("cover",""),
+                        "views":   views,
+                        "likes":   int(stats.get("likes", 0) or 0),
+                        "creator": cr.get("nickname","") or cr.get("username",""),
+                    }
+
+    result = [d for d in brand_data.values() if d["count"] > 0]
+    result.sort(key=lambda x: x["total_views"], reverse=True)
+    return jsonify(result)
+
+
+@app.route("/api/trends/brands/videos")
+def api_trends_brand_videos():
+    """특정 브랜드가 언급된 TikTok 영상 목록 (뷰 순 최대 30개)"""
+    brand = (request.args.get("brand") or "").lower().strip()
+    if not brand:
+        return jsonify([])
+    files = sorted(glob.glob(os.path.join(_SCRIPT_DIR, "data_*.json")), reverse=True)[:14]
+    videos = []
+    for fpath in files:
+        date_str = os.path.basename(fpath).replace("data_","").replace(".json","")
+        try:
+            with open(fpath, encoding="utf-8") as f:
+                for v in json.load(f):
+                    cap  = (v.get("caption") or "").lower()
+                    tags = " ".join(v.get("hashtags") or []).lower()
+                    if brand not in cap + " " + tags:
+                        continue
+                    stats = v.get("stats") or {}
+                    cr    = v.get("creator") or {}
+                    views = int(stats.get("views", 0) or 0)
+                    videos.append({
+                        "url":     v.get("url",""),
+                        "caption": (v.get("caption") or "")[:200],
+                        "cover":   v.get("cover",""),
+                        "date":    date_str,
+                        "views":   views,
+                        "likes":   int(stats.get("likes", 0) or 0),
+                        "comments":int(stats.get("comments", 0) or 0),
+                        "saves":   int(stats.get("saves", 0) or 0),
+                        "creator": cr.get("nickname","") or cr.get("username",""),
+                        "creator_url": v.get("url",""),
+                    })
+        except Exception:
+            continue
+    videos.sort(key=lambda x: x["views"], reverse=True)
+    return jsonify(videos[:30])
+
+
 @app.route("/")
 def index():
-    return render_template_string(HTML)
+    resp = make_response(render_template_string(HTML))
+    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
 
 # ── HTML ──────────────────────────────────────────────────────────────────────
 
@@ -1021,8 +1257,8 @@ select.fs:focus{border-color:var(--pink);background:#fff}
 .dash-mini-item{display:flex;flex-direction:column;text-decoration:none;color:inherit;border-bottom:1px solid var(--border);transition:background .15s;overflow:hidden}
 .dash-mini-item:hover{background:var(--pink-light)}
 .dash-mini-item:last-child{border-bottom:none}
-.dash-mini-thumb{width:100%;padding-top:78%;position:relative;background:#f9f3f5;overflow:hidden}
-.dash-mini-thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;padding:10px;transition:transform .3s}
+.dash-mini-thumb{width:100%;padding-top:78%;position:relative;background:#ede9e7;overflow:hidden;border-bottom:1px solid #e0d9d6}
+.dash-mini-thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;padding:8px;transition:transform .3s}
 .dash-mini-item:hover .dash-mini-thumb img{transform:scale(1.04)}
 .dash-mini-ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:2rem;color:var(--pink-mid)}
 .dash-mini-rank{position:absolute;top:7px;left:7px;font-size:.68rem;font-weight:900;color:#fff;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.25);z-index:2}
@@ -1366,17 +1602,19 @@ select.fs:focus{border-color:var(--pink);background:#fff}
 #trend-hub .tr-body{padding:24px 28px}
 
 /* 타임라인 섹션 */
-#trend-hub .tl-controls{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:20px}
-#trend-hub .tl-metric-sel{padding:8px 14px;border:1.5px solid var(--border);border-radius:9px;
-  font-size:0.82rem;background:white;cursor:pointer;outline:none;color:var(--text)}
-#trend-hub .tl-kw-pills{display:flex;flex-wrap:wrap;gap:6px}
-#trend-hub .tl-pill{padding:5px 13px;border-radius:20px;border:1.5px solid var(--border);
-  background:white;font-size:0.75rem;font-weight:700;cursor:pointer;transition:all 0.15s;color:#555}
-#trend-hub .tl-pill.active{color:white;border-color:transparent}
-#trend-hub .tl-pill:hover{opacity:0.85}
+#trend-hub .tl-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px}
+#trend-hub .tl-sum-card{background:white;border-radius:12px;padding:14px 16px;border:1.5px solid #eee;text-align:center}
+#trend-hub .tl-sum-card .sum-label{font-size:0.68rem;color:#aaa;font-weight:700;margin-bottom:4px;letter-spacing:0.04em}
+#trend-hub .tl-sum-card .sum-value{font-size:1rem;font-weight:800;color:#1a1a1a}
+#trend-hub .tl-sum-card .sum-sub{font-size:0.71rem;color:#888;margin-top:3px}
+#trend-hub .tl-cat-btns{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+#trend-hub .tl-cat-btn{padding:6px 16px;border-radius:20px;border:1.5px solid var(--border);
+  background:white;font-size:0.8rem;font-weight:700;cursor:pointer;color:#555;transition:all 0.15s}
+#trend-hub .tl-cat-btn:hover{border-color:#2d3561;color:#2d3561}
+#trend-hub .tl-cat-btn.active{background:#2d3561;color:white;border-color:#2d3561}
 #trend-hub .chart-card{background:white;border-radius:16px;padding:24px;
   box-shadow:0 1px 6px rgba(0,0,0,0.06);margin-bottom:24px}
-#trend-hub .chart-card canvas{max-height:340px}
+#trend-hub .chart-card canvas{max-height:420px}
 #trend-hub .chart-label{font-size:0.78rem;font-weight:800;color:var(--muted);
   text-transform:uppercase;letter-spacing:0.6px;margin-bottom:12px}
 
@@ -1411,7 +1649,72 @@ select.fs:focus{border-color:var(--pink);background:#fff}
   font-size:0.7rem;font-weight:800;padding:3px 10px;border-radius:12px;
   background:linear-gradient(135deg,#2d3561,#1a1f3c);color:white;margin-bottom:8px}
 #trend-hub .empty-state{text-align:center;padding:60px;color:#ccc}
+
+/* ── 순위 변동 패널 ── */
+#rank-change-panel{position:fixed;inset:0;z-index:8888;background:rgba(0,0,0,0.5);
+  display:none;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto}
+#rank-change-inner{background:white;border-radius:18px;width:100%;max-width:960px;
+  margin:auto;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,0.2)}
+.rc-period-btns{display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap}
+.rc-period-btn{padding:6px 18px;border-radius:20px;border:1.5px solid #e2e8f0;
+  background:white;font-size:0.8rem;font-weight:700;cursor:pointer;color:#555;transition:all 0.15s}
+.rc-period-btn.active{background:#2d3561;color:white;border-color:#2d3561}
+.rc-country-filter{display:flex;gap:6px;margin-bottom:18px;flex-wrap:wrap}
+.rc-ctry-btn{padding:4px 12px;border-radius:14px;border:1.5px solid #e2e8f0;
+  background:white;font-size:0.75rem;font-weight:700;cursor:pointer;color:#555}
+.rc-ctry-btn.active{background:#f1f5f9;border-color:#94a3b8;color:#1e293b}
+.rc-section-title{font-size:0.85rem;font-weight:800;color:#1e293b;margin:18px 0 10px;
+  display:flex;align-items:center;gap:6px}
+.rc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-bottom:8px}
+.rc-card{background:#f8fafc;border-radius:12px;padding:12px 14px;display:flex;
+  align-items:center;gap:12px;border:1px solid #e2e8f0;transition:box-shadow 0.1s}
+.rc-card:hover{box-shadow:0 2px 8px rgba(0,0,0,0.08)}
+.rc-thumb{width:48px;height:48px;object-fit:cover;border-radius:8px;flex-shrink:0}
+.rc-thumb-ph{width:48px;height:48px;border-radius:8px;background:#e2e8f0;
+  display:flex;align-items:center;justify-content:center;font-size:1.2rem;flex-shrink:0}
+.rc-badge-up{background:#dcfce7;color:#16a34a;font-weight:800;font-size:0.8rem;
+  padding:2px 8px;border-radius:10px;white-space:nowrap;flex-shrink:0}
+.rc-badge-down{background:#fee2e2;color:#dc2626;font-weight:800;font-size:0.8rem;
+  padding:2px 8px;border-radius:10px;white-space:nowrap;flex-shrink:0}
+.rc-badge-new{background:#ede9fe;color:#7c3aed;font-weight:800;font-size:0.8rem;
+  padding:2px 8px;border-radius:10px;white-space:nowrap;flex-shrink:0}
 #trend-hub .empty-state .icon{font-size:3rem;margin-bottom:12px}
+/* 브랜드 버즈 */
+#trend-hub .br-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
+#trend-hub .br-card{background:white;border-radius:14px;padding:16px;
+  box-shadow:0 1px 6px rgba(0,0,0,0.06);border-top:3px solid #e5e7eb;
+  transition:transform 0.15s,box-shadow 0.15s;cursor:default}
+#trend-hub .br-card:hover{transform:translateY(-2px);box-shadow:0 4px 16px rgba(0,0,0,0.1)}
+#trend-hub .br-header{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+#trend-hub .br-icon{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;
+  justify-content:center;font-size:1rem;font-weight:800;color:white;flex-shrink:0}
+#trend-hub .br-name{font-size:0.95rem;font-weight:800;color:#1a1a1a;text-transform:capitalize}
+#trend-hub .br-trend{font-size:0.65rem;font-weight:700;padding:2px 7px;border-radius:10px;
+  margin-top:2px;display:inline-block}
+#trend-hub .br-trend.hot{background:#fee2e2;color:#ef4444}
+#trend-hub .br-trend.up{background:#fef3c7;color:#d97706}
+#trend-hub .br-trend.stable{background:#f0f4ff;color:#4f46e5}
+#trend-hub .br-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px}
+#trend-hub .br-stat{text-align:center;background:#f9f9f9;border-radius:8px;padding:7px 4px}
+#trend-hub .br-stat .bv{font-size:0.85rem;font-weight:800;color:#333}
+#trend-hub .br-stat .bl{font-size:0.6rem;color:#aaa;margin-top:1px}
+#trend-hub .br-video{border-radius:9px;overflow:hidden;background:#f0f0f0;display:flex;gap:0;margin-bottom:8px}
+#trend-hub .br-thumb{width:72px;height:72px;object-fit:cover;flex-shrink:0}
+#trend-hub .br-thumb-ph{width:72px;height:72px;background:#e5e7eb;display:flex;align-items:center;
+  justify-content:center;font-size:1.4rem;flex-shrink:0}
+#trend-hub .br-vcap{flex:1;padding:8px 10px;font-size:0.72rem;color:#555;
+  line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
+#trend-hub .br-footer{display:flex;justify-content:space-between;align-items:center}
+#trend-hub .br-creator{font-size:0.72rem;color:#aaa}
+#trend-hub .br-link{color:#1d9bf0;text-decoration:none;font-size:0.75rem;font-weight:700}
+#trend-hub .br-link:hover{text-decoration:underline}
+#trend-hub .br-sort{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+#trend-hub .br-sort-btn{padding:5px 14px;border-radius:20px;border:1.5px solid var(--border);
+  background:white;font-size:0.78rem;font-weight:700;cursor:pointer;color:#555;transition:all 0.15s}
+#trend-hub .br-sort-btn.active{background:#2d3561;color:white;border-color:#2d3561}
+#trend-hub .br-view-btn{padding:5px 14px;border-radius:20px;border:1.5px solid var(--border);
+  background:white;font-size:0.78rem;font-weight:700;cursor:pointer;color:#555;transition:all 0.15s}
+#trend-hub .br-view-btn.active{background:#2d3561;color:white;border-color:#2d3561}
 
 /* 크리에이터 신호 카드 */
 #trend-hub .cr-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
@@ -1479,8 +1782,33 @@ select.fs:focus{border-color:var(--pink);background:#fff}
     </div>
     <span class="upd" id="updLbl">—</span>
     <button id="refreshBtn" onclick="refreshData()">↻ 새로고침</button>
+    <button onclick="rcOpen()" style="padding:6px 14px;background:#f1f5f9;border:1.5px solid #e2e8f0;
+      border-radius:9px;font-size:0.78rem;font-weight:700;cursor:pointer;color:#374151">
+      📊 순위 변동
+    </button>
   </div>
 </header>
+
+<!-- 순위 변동 패널 -->
+<div id="rank-change-panel" onclick="if(event.target===this)rcClose()">
+  <div id="rank-change-inner">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">
+      <div>
+        <div style="font-weight:800;font-size:1.1rem;color:#1e293b">📊 순위 변동 추적</div>
+        <div id="rc-compare-label" style="font-size:0.75rem;color:#94a3b8;margin-top:2px"></div>
+      </div>
+      <button onclick="rcClose()" style="border:none;background:none;font-size:1.4rem;cursor:pointer;color:#94a3b8">✕</button>
+    </div>
+    <div class="rc-period-btns">
+      <button class="rc-period-btn active" data-p="1d" onclick="rcSetPeriod('1d',this)">1일</button>
+      <button class="rc-period-btn" data-p="1w" onclick="rcSetPeriod('1w',this)">1주일</button>
+      <button class="rc-period-btn" data-p="30d" onclick="rcSetPeriod('30d',this)">30일</button>
+      <button class="rc-period-btn" data-p="90d" onclick="rcSetPeriod('90d',this)">90일</button>
+    </div>
+    <div class="rc-country-filter" id="rc-country-filter"></div>
+    <div id="rc-body" style="min-height:200px"></div>
+  </div>
+</div>
 
 <div id="product-hub">
 <div class="ctabs" id="tabs"></div>
@@ -1750,28 +2078,33 @@ select.fs:focus{border-color:var(--pink);background:#fff}
       <button class="tr-tab active" id="tr-tab-timeline" onclick="trSwitchTab('timeline',this)">📊 키워드 타임라인</button>
       <button class="tr-tab" id="tr-tab-gaps" onclick="trSwitchTab('gaps',this)">🔍 공백 시장 탐지</button>
       <button class="tr-tab" id="tr-tab-creators" onclick="trSwitchTab('creators',this)">🌱 크리에이터 신호</button>
+      <button class="tr-tab" id="tr-tab-brands" onclick="trSwitchTab('brands',this)">🏷️ 브랜드 버즈</button>
     </div>
   </div>
 
   <!-- 타임라인 패널 -->
   <div id="tr-panel-timeline" class="tr-body">
-    <div class="tl-controls">
-      <select class="tl-metric-sel" id="tl-metric" onchange="trRenderTimeline()">
-        <option value="buzz">🔥 버즈 스코어</option>
-        <option value="likes">❤️ 좋아요</option>
-        <option value="views">👁 뷰</option>
-        <option value="tweets">✉️ 트윗 수</option>
-      </select>
-      <div class="tl-kw-pills" id="tl-kw-pills"></div>
+    <div style="font-size:0.82rem;color:#666;line-height:1.6;margin-bottom:16px">
+      K-beauty 성분·제형 키워드가 <strong>🌏 아시아 마켓</strong>(OliveYoung·Amazon JP·Qoo10) vs
+      <strong>🌍 서양 마켓</strong>(Amazon US·UK·TikTok Shop·YesStyle)에 상품이 얼마나 있는지 비교해.
+      <span style="color:#ef4444">아시아가 높으면</span> 아직 서양에 기회가 있다는 신호야.
+    </div>
+    <!-- 요약 카드 -->
+    <div class="tl-summary" id="tl-summary"></div>
+    <!-- 카테고리 필터 -->
+    <div class="tl-cat-btns">
+      <button class="tl-cat-btn active" onclick="trSetCat('전체',this)">전체</button>
+      <button class="tl-cat-btn" onclick="trSetCat('성분',this)">💊 핵심 성분</button>
+      <button class="tl-cat-btn" onclick="trSetCat('제형',this)">🧴 제형 타입</button>
+      <button class="tl-cat-btn" onclick="trSetCat('기능성',this)">☀️ 기능성</button>
     </div>
     <div class="chart-card">
-      <div class="chart-label">날짜별 키워드 인게이지먼트 추이 (JP Twitter)</div>
+      <div class="chart-label">아시아 vs 서양 마켓 상품 수 비교 (많을수록 해당 마켓에서 인기)</div>
       <canvas id="tl-chart"></canvas>
     </div>
     <div id="tl-empty" class="empty-state" style="display:none">
       <div class="icon">📊</div>
-      <p>Twitter 수집 데이터가 2개 이상 날짜 있어야 타임라인이 표시돼.</p>
-      <p style="margin-top:8px;font-size:0.8rem;color:#bbb">Run New Scrape → 다음날 재확인</p>
+      <p>상품 데이터가 없어. 새로고침 후 다시 확인해.</p>
     </div>
   </div>
 
@@ -1779,10 +2112,10 @@ select.fs:focus{border-color:var(--pink);background:#fff}
   <div id="tr-panel-gaps" class="tr-body" style="display:none">
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap">
       <div style="font-size:0.82rem;color:#666;line-height:1.6;max-width:640px">
-        소셜에서 많이 언급되는데 아마존·TikTok에 상품이 적은 키워드 = PB 진입 기회.<br>
-        <span style="color:#ef4444;font-weight:700">🔴 Hot Gap</span> 최우선 검토 &nbsp;
-        <span style="color:#d97706;font-weight:700">🟡 Warm Gap</span> 관찰 &nbsp;
-        <span style="color:#2563eb;font-weight:700">🔵 Well-covered</span> 경쟁 포화
+        아시아 마켓(OliveYoung·JP·Qoo10)에서 상품이 많은데 서양 마켓(US·UK·TikTok Shop·YesStyle)에는 적은 성분 = K-beauty PB 진입 기회.<br>
+        <span style="color:#ef4444;font-weight:700">🔴 Hot Gap</span> 아시아 독주, 서양 공백 &nbsp;
+        <span style="color:#d97706;font-weight:700">🟡 Warm Gap</span> 균형점 &nbsp;
+        <span style="color:#2563eb;font-weight:700">🔵 Well-covered</span> 서양 이미 포화
       </div>
       <button onclick="trLoadGaps()" style="margin-left:auto;padding:8px 18px;background:#2d3561;color:white;
         border:none;border-radius:9px;font-weight:700;font-size:0.82rem;cursor:pointer">↻ 새로 분석</button>
@@ -1798,11 +2131,11 @@ select.fs:focus{border-color:var(--pink);background:#fff}
   <div id="tr-panel-creators" class="tr-body" style="display:none">
     <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:20px;flex-wrap:wrap">
       <div style="font-size:0.82rem;color:#666;line-height:1.6;max-width:680px">
-        팔로워 대비 인게이지먼트가 높은 K-beauty 크리에이터 = 아직 주류화 전 초기 신호.<br>
+        TikTok K-beauty 크리에이터 중 팔로워 적은데 인게이지먼트 높은 계정 = 아직 주류화 전 초기 신호.<br>
         <span style="color:#ef4444;font-weight:700">🔴 Breakthrough</span> ER 20%+ &nbsp;
         <span style="color:#d97706;font-weight:700">🟡 Rising</span> ER 5~20% &nbsp;
         <span style="color:#2563eb;font-weight:700">🔵 Emerging</span> ER 5% 미만<br>
-        <span style="font-size:0.73rem;color:#aaa">ER = (좋아요 + RT×3 + 답글×2) ÷ 팔로워 × 100. 팔로워 100~10만 계정만 포함.</span>
+        <span style="font-size:0.73rem;color:#aaa">ER = (좋아요 + 댓글×2 + 공유×3 + 저장×2) ÷ 뷰 × 100. TikTok은 알고리즘 배포 특성상 뷰 기준이 더 정확. 팔로워 100~10만 계정만 포함.</span>
       </div>
       <button onclick="trLoadCreators()" style="margin-left:auto;padding:8px 18px;background:#2d3561;color:white;
         border:none;border-radius:9px;font-weight:700;font-size:0.82rem;cursor:pointer">↻ 새로 분석</button>
@@ -1810,13 +2143,48 @@ select.fs:focus{border-color:var(--pink);background:#fff}
     <div id="tr-creators-grid" class="cr-grid"></div>
     <div id="tr-creators-empty" class="empty-state" style="display:none">
       <div class="icon">🌱</div>
-      <p>K-beauty 크리에이터 데이터가 없어. 먼저 Twitter 수집 후 다시 확인해.</p>
+      <p>K-beauty 크리에이터 데이터가 없어. 먼저 TikTok 수집 후 다시 확인해.</p>
+    </div>
+  </div>
+
+  <!-- 브랜드 버즈 패널 -->
+  <div id="tr-panel-brands" class="tr-body" style="display:none">
+    <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+      <div style="font-size:0.82rem;color:#666;line-height:1.6;max-width:680px">
+        지금 터지는 K-beauty 바이럴 영상(캡션·해시태그)에서 언급된 브랜드 순위.
+        총 뷰가 높을수록 바이럴 영상들에 더 많이 노출된 브랜드야.<br>
+        <span style="color:#ef4444;font-weight:700">🔥 급상승</span> 최근 급증 &nbsp;
+        <span style="color:#d97706;font-weight:700">↑ 상승 중</span> 꾸준히 증가 &nbsp;
+        <span style="color:#4f46e5;font-weight:700">→ 안정적</span> 기존 강자
+      </div>
+      <button onclick="trLoadBrands()" style="margin-left:auto;padding:8px 18px;background:#2d3561;color:white;
+        border:none;border-radius:9px;font-weight:700;font-size:0.82rem;cursor:pointer">↻ 새로 분석</button>
+    </div>
+    <!-- 정렬 + 뷰 토글 -->
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:16px">
+      <div class="br-sort" style="margin-bottom:0">
+        <button class="br-sort-btn active" onclick="brSetSort('views',this)">👁 총 뷰 순</button>
+        <button class="br-sort-btn" onclick="brSetSort('count',this)">📹 영상 수 순</button>
+        <button class="br-sort-btn" onclick="brSetSort('trend',this)">🔥 트렌드 순</button>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="br-view-btn active" id="br-view-card" onclick="brSetView('card',this)">📋 카드</button>
+        <button class="br-view-btn" id="br-view-chart" onclick="brSetView('chart',this)">📊 차트</button>
+      </div>
+    </div>
+    <div id="tr-brands-grid" class="br-grid"></div>
+    <div id="tr-brands-chart" style="display:none;background:white;border-radius:14px;padding:20px;box-shadow:0 1px 6px rgba(0,0,0,0.07)">
+      <canvas id="br-chart-canvas"></canvas>
+    </div>
+    <div id="tr-brands-empty" class="empty-state" style="display:none">
+      <div class="icon">🏷️</div>
+      <p>TikTok 데이터가 없어. data_*.json 파일을 확인해.</p>
     </div>
   </div>
 </div>
 
 <script>
-let all = [], country = 'DB', ysSub = 'All Beauty', oySub = 'All', qjSub = 'All', ttSub = 'All', ttPeriod = '30d';
+let all = [], country = sessionStorage.getItem('kbCountry') || 'DB', ysSub = 'All Beauty', oySub = 'All', qjSub = 'All', ttSub = 'All', ttPeriod = '30d';
 
 // country order: ALL first, then US, UK, JP, then others
 const ORDER = ['DB','CH','IG','US','OY','TT','YS','JP','UK','QJ','DE','FR','CA','AU','IT','ES'];
@@ -1833,6 +2201,8 @@ async function loadData() {
     render();
   } catch(e) { console.error(e); }
   hide();
+  const savedMode = sessionStorage.getItem('kbMode') || 'product';
+  if (savedMode !== 'product') switchMode(savedMode);
 }
 
 async function refreshData() {
@@ -1864,6 +2234,7 @@ function setUpdated(ts) {
 }
 
 function goTab(code) {
+  sessionStorage.setItem('kbCountry', code);
   country=code; ysSub='All Beauty'; oySub='All'; qjSub='All'; ttSub='All'; ttPeriod='30d';
   resetYsPills(); resetOyPills(); resetQjPills(); resetTtPills(); resetTtPeriodPills();
   buildTabs(); render();
@@ -2045,7 +2416,7 @@ function renderDashboard() {
     top5.forEach((item,idx) => {
       const r=idx+1, rc=r===1?'r1':r===2?'r2':r===3?'r3':'rn';
       const th=item.thumbnailUrl;
-      const imgEl=th?`<img src="${th}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`:'' ;
+      const imgEl=th?`<img src="${th}" alt="" loading="eager" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`:'' ;
       const phEl=`<div class="dash-mini-ph" style="${th?'display:none':''}">🧴</div>`;
       const rawPrice = item._price_value;
       const cur = item._price_currency || '';
@@ -2617,10 +2988,11 @@ let currentMode = 'product';
 let videoHubInitialized = false;
 
 function switchMode(mode) {
+  sessionStorage.setItem('kbMode', mode);
   currentMode = mode;
   document.getElementById('product-hub').style.display = mode === 'product' ? '' : 'none';
   document.getElementById('video-hub').style.display   = mode === 'video'   ? '' : 'none';
-  document.getElementById('trend-hub').style.display   = mode === 'trend'   ? '' : 'none';
+  document.getElementById('trend-hub').style.display   = mode === 'trend'   ? 'block' : 'none';
   document.getElementById('mode-product').classList.toggle('active', mode === 'product');
   document.getElementById('mode-video').classList.toggle('active', mode === 'video');
   document.getElementById('mode-trend').classList.toggle('active', mode === 'trend');
@@ -3727,8 +4099,14 @@ let trTimelineData = {};
 let trGapsData = [];
 let trCreatorsData = [];
 let trCreatorsLoaded = false;
+let trBrandsData = [];
+let trBrandsLoaded = false;
+let trBrandsSort = 'views';
+let trBrandsView = 'card';
+let brChartInstance = null;
 let trActiveKws = new Set();
 let trChart = null;
+let trActiveCat = '전체';
 
 const TR_COLORS = [
   '#6366f1','#ec4899','#f59e0b','#10b981','#3b82f6',
@@ -3739,18 +4117,31 @@ const TR_COLORS = [
 async function trInit() {
   await trLoadTimeline();
   trLoadGaps();
+  const savedTab = sessionStorage.getItem('kbTrTab') || 'timeline';
+  if (savedTab !== 'timeline') {
+    const btn = document.getElementById('tr-tab-' + savedTab);
+    if (btn) trSwitchTab(savedTab, btn);
+  }
 }
 
 function trSwitchTab(tab, btn) {
-  document.getElementById('tr-panel-timeline').style.display  = tab === 'timeline'  ? '' : 'none';
-  document.getElementById('tr-panel-gaps').style.display      = tab === 'gaps'      ? '' : 'none';
-  document.getElementById('tr-panel-creators').style.display  = tab === 'creators'  ? '' : 'none';
+  sessionStorage.setItem('kbTrTab', tab);
+  document.getElementById('tr-panel-timeline').style.display = tab === 'timeline' ? '' : 'none';
+  document.getElementById('tr-panel-gaps').style.display     = tab === 'gaps'     ? '' : 'none';
+  document.getElementById('tr-panel-creators').style.display = tab === 'creators' ? '' : 'none';
+  document.getElementById('tr-panel-brands').style.display   = tab === 'brands'   ? '' : 'none';
   document.querySelectorAll('#trend-hub .tr-tab').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   if (tab === 'creators' && !trCreatorsLoaded) { trLoadCreators(); trCreatorsLoaded = true; }
+  if (tab === 'brands'   && !trBrandsLoaded)   { trLoadBrands();   trBrandsLoaded = true; }
 }
 
 // ── Timeline ──────────────────────────────────────────────────────────────
+
+const MARKET_COLORS = {
+  'US':'#3b82f6','UK':'#8b5cf6','JP':'#ef4444',
+  'OY':'#10b981','TT':'#1a1a1a','YS':'#f59e0b','QJ':'#ec4899'
+};
 
 async function trLoadTimeline() {
   try {
@@ -3758,94 +4149,135 @@ async function trLoadTimeline() {
     trTimelineData = await r.json();
   } catch(e) { trTimelineData = {}; }
 
-  const dates = Object.keys(trTimelineData).sort();
-  if (dates.length < 1) {
+  const allKws = trTimelineData.keywords || [];
+  if (!allKws.length) {
     document.getElementById('tl-empty').style.display = '';
     document.querySelector('#tr-panel-timeline .chart-card').style.display = 'none';
     return;
   }
+  trRenderTimeline();
+}
 
-  // Collect all keywords across all dates
-  const kwSet = new Set();
-  Object.values(trTimelineData).forEach(day => Object.keys(day).forEach(k => kwSet.add(k)));
-  const allKws = [...kwSet].sort();
-
-  // Default: pick top 6 by total buzz
-  const kwBuzz = {};
-  allKws.forEach(kw => {
-    kwBuzz[kw] = Object.values(trTimelineData).reduce((s, day) => s + (day[kw]?.buzz || 0), 0);
-  });
-  const topKws = allKws.sort((a,b) => kwBuzz[b] - kwBuzz[a]).slice(0, 6);
-  trActiveKws = new Set(topKws);
-
-  // Build pills
-  const pillsEl = document.getElementById('tl-kw-pills');
-  pillsEl.innerHTML = '';
-  allKws.forEach((kw, i) => {
-    const btn = document.createElement('button');
-    btn.className = 'tl-pill' + (trActiveKws.has(kw) ? ' active' : '');
-    btn.textContent = kw;
-    btn.dataset.kw = kw;
-    const col = TR_COLORS[i % TR_COLORS.length];
-    if (trActiveKws.has(kw)) btn.style.background = col;
-    btn.style.setProperty('--col', col);
-    btn.onclick = () => {
-      if (trActiveKws.has(kw)) { trActiveKws.delete(kw); btn.classList.remove('active'); btn.style.background = ''; }
-      else { trActiveKws.add(kw); btn.classList.add('active'); btn.style.background = col; }
-      trRenderTimeline();
-    };
-    pillsEl.appendChild(btn);
-  });
-
+function trSetCat(cat, btn) {
+  trActiveCat = cat;
+  document.querySelectorAll('.tl-cat-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
   trRenderTimeline();
 }
 
 function trRenderTimeline() {
-  const metric = document.getElementById('tl-metric').value;
-  const dates  = Object.keys(trTimelineData).sort();
-  const activeKws = [...trActiveKws];
+  const allKws    = trTimelineData.keywords || [];
+  const data      = trTimelineData.data || {};
+  const labels    = trTimelineData.labels || {};
+  const categories = trTimelineData.categories || {};
 
-  const datasets = activeKws.map((kw, i) => {
-    const pillBtns = document.querySelectorAll('#tl-kw-pills .tl-pill');
-    let col = TR_COLORS[i % TR_COLORS.length];
-    pillBtns.forEach(b => { if (b.dataset.kw === kw) col = b.style.background || col; });
-    // Find original index for color consistency
-    const allKws = [...document.querySelectorAll('#tl-kw-pills .tl-pill')].map(b => b.dataset.kw);
-    const origIdx = allKws.indexOf(kw);
-    col = TR_COLORS[origIdx % TR_COLORS.length];
-    return {
-      label: kw,
-      data: dates.map(d => trTimelineData[d]?.[kw]?.[metric] || 0),
-      borderColor: col,
-      backgroundColor: col + '22',
-      borderWidth: 2.5,
-      pointRadius: 4,
-      pointHoverRadius: 6,
-      tension: 0.35,
-      fill: false,
-    };
-  });
+  const ASIAN   = ['OY','JP','QJ'];
+  const WESTERN = ['US','UK','TT','YS'];
+  const MARKET_NAMES = { OY:'OliveYoung', JP:'Amazon JP', QJ:'Qoo10', US:'Amazon US', UK:'Amazon UK', TT:'TikTok Shop', YS:'YesStyle' };
+
+  // 카테고리 필터
+  const filtered = trActiveCat === '전체'
+    ? allKws
+    : allKws.filter(kw => (categories[kw] || '성분') === trActiveCat);
+
+  // 아시아/서양 합계 계산 + 정렬
+  const withTotals = filtered.map(kw => {
+    const d = data[kw] || {};
+    const asian   = ASIAN.reduce((s, m) => s + (d[m] || 0), 0);
+    const western = WESTERN.reduce((s, m) => s + (d[m] || 0), 0);
+    return { kw, asian, western, total: asian + western, d };
+  }).filter(x => x.total > 0).sort((a, b) => b.total - a.total);
+
+  // 요약 카드
+  const summaryEl = document.getElementById('tl-summary');
+  if (summaryEl && withTotals.length > 0) {
+    const top1 = withTotals[0];
+    const mostAsian  = [...withTotals].sort((a, b) => (b.asian / (b.total||1)) - (a.asian / (a.total||1)))[0];
+    const mostWest   = [...withTotals].sort((a, b) => (b.western / (b.total||1)) - (a.western / (a.total||1)))[0];
+    const ko = kw => labels[kw] || kw;
+    summaryEl.innerHTML = `
+      <div class="tl-sum-card">
+        <div class="sum-label">🏆 전체 1위</div>
+        <div class="sum-value">${ko(top1.kw)}</div>
+        <div class="sum-sub">전 마켓 합산 ${top1.total}개 상품</div>
+      </div>
+      <div class="tl-sum-card" style="border-color:#fca5a5">
+        <div class="sum-label">🌏 아시아 집중</div>
+        <div class="sum-value">${ko(mostAsian.kw)}</div>
+        <div class="sum-sub">아시아 ${mostAsian.asian}개 · 서양 ${mostAsian.western}개</div>
+      </div>
+      <div class="tl-sum-card" style="border-color:#93c5fd">
+        <div class="sum-label">🌍 서양 강세</div>
+        <div class="sum-value">${ko(mostWest.kw)}</div>
+        <div class="sum-sub">서양 ${mostWest.western}개 · 아시아 ${mostWest.asian}개</div>
+      </div>`;
+  }
+
+  if (!withTotals.length) return;
+
+  // Top 15만 차트에 표시
+  const top = withTotals.slice(0, 15);
+
+  // Y축 레이블: 한국어명 (영문) 형태
+  const kwLabels = top.map(x => labels[x.kw] ? `${labels[x.kw]}  (${x.kw})` : x.kw);
 
   const ctx = document.getElementById('tl-chart');
   if (trChart) { trChart.destroy(); trChart = null; }
   trChart = new Chart(ctx, {
-    type: 'line',
-    data: { labels: dates, datasets },
+    type: 'bar',
+    data: {
+      labels: kwLabels,
+      datasets: [
+        {
+          label: '🌏 아시아 (OY·JP·Qoo10)',
+          data: top.map(x => x.asian),
+          backgroundColor: '#fca5a5bb',
+          borderColor: '#ef4444',
+          borderWidth: 1.5,
+          borderRadius: 4,
+        },
+        {
+          label: '🌍 서양 (US·UK·TikTok·YesStyle)',
+          data: top.map(x => x.western),
+          backgroundColor: '#93c5fdbb',
+          borderColor: '#3b82f6',
+          borderWidth: 1.5,
+          borderRadius: 4,
+        },
+      ]
+    },
     options: {
+      indexAxis: 'y',
       responsive: true,
       interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { position: 'top', labels: { font: { size: 11, weight: '700' }, padding: 16 } },
+        legend: { position: 'top', labels: { font: { size: 11, weight: '700' }, padding: 14 } },
         tooltip: {
           callbacks: {
-            label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString()}`,
+            afterBody: items => {
+              const x = top[items[0]?.dataIndex];
+              if (!x) return '';
+              const lines = ['', '── 마켓별 상세 ──'];
+              Object.entries(MARKET_NAMES).forEach(([code, name]) => {
+                const cnt = x.d[code] || 0;
+                if (cnt) lines.push(`  ${name}: ${cnt}개`);
+              });
+              return lines;
+            }
           }
         }
       },
       scales: {
-        x: { grid: { color: '#f0f0f0' }, ticks: { font: { size: 11 } } },
-        y: { grid: { color: '#f0f0f0' }, ticks: { font: { size: 11 },
-             callback: v => v >= 1000 ? (v/1000).toFixed(1)+'K' : v } },
+        x: {
+          stacked: false,
+          grid: { color: '#f0f0f0' },
+          ticks: { font: { size: 10 }, callback: v => `${v}개` }
+        },
+        y: {
+          stacked: false,
+          grid: { display: false },
+          ticks: { font: { size: 11 } }
+        }
       }
     }
   });
@@ -3870,41 +4302,43 @@ async function trLoadGaps() {
     return;
   }
 
-  const maxBuzz = Math.max(...trGapsData.map(g => g.buzz), 1);
   const maxScore = trGapsData[0]?.gap_score || 1;
 
   grid.innerHTML = trGapsData.map(g => {
     const pct = Math.round(g.gap_score / maxScore * 100);
-    const buzzPct = Math.round(g.buzz / maxBuzz * 100);
     let tier, tierLabel;
     if (pct >= 60)      { tier = 'hot';  tierLabel = '🔴 Hot Gap'; }
     else if (pct >= 30) { tier = 'warm'; tierLabel = '🟡 Warm Gap'; }
     else                { tier = 'cool'; tierLabel = '🔵 Well-covered'; }
 
     const barCol = tier === 'hot' ? '#ef4444' : tier === 'warm' ? '#f59e0b' : '#3b82f6';
+    const asianPct = Math.round(g.asian_count / Math.max(g.total_count, 1) * 100);
     const opportunity = tier === 'hot'
-      ? 'PB 진입 기회 높음 — 소셜 관심 대비 경쟁 상품 희박'
+      ? '아시아 마켓 독주 — 서양 진출 공백, PB 진입 최우선 검토'
       : tier === 'warm'
-      ? '소셜 언급 중간, 상품 일부 존재 — 차별화 가능'
-      : '이미 상품이 많음 — 가격/포지셔닝 차별화 필요';
+      ? '아시아↔서양 균형점 — 차별화 전략으로 진입 가능'
+      : '서양 마켓 이미 포화 — 가격·포지셔닝 차별화 필요';
 
-    return \`<div class="gap-card \${tier}">
-      <div class="gap-score-badge">GAP \${pct}</div>
+    const asianDetail = Object.entries(g.asian_detail || {}).map(([k,v]) => `${k}:${v}`).join(' · ');
+    const westDetail  = Object.entries(g.western_detail || {}).map(([k,v]) => `${k}:${v}`).join(' · ');
+
+    return `<div class="gap-card ${tier}">
+      <div class="gap-score-badge">GAP ${pct}</div>
       <div class="gap-keyword">
-        <span>\${g.keyword}</span>
-        <span class="gap-badge \${tier}">\${tierLabel}</span>
+        <span>${g.keyword}</span>
+        <span class="gap-badge ${tier}">${tierLabel}</span>
       </div>
       <div class="gap-metrics">
-        <div class="gap-metric"><div class="gv">\${trFmt(g.buzz)}</div><div class="gl">버즈 스코어</div></div>
-        <div class="gap-metric"><div class="gv">\${trFmt(g.likes)}</div><div class="gl">총 좋아요</div></div>
-        <div class="gap-metric"><div class="gv">\${g.product_hits}</div><div class="gl">상품 수</div></div>
+        <div class="gap-metric"><div class="gv">${g.asian_count}</div><div class="gl">아시아 상품${asianDetail ? '<br><span style="font-size:0.58rem;color:#bbb">'+asianDetail+'</span>' : ''}</div></div>
+        <div class="gap-metric"><div class="gv">${g.western_count}</div><div class="gl">서양 상품${westDetail ? '<br><span style="font-size:0.58rem;color:#bbb">'+westDetail+'</span>' : ''}</div></div>
+        <div class="gap-metric"><div class="gv">${g.total_count}</div><div class="gl">전체 상품</div></div>
       </div>
       <div class="gap-bar-wrap">
-        <div class="gap-bar-label"><span>소셜 버즈</span><span>\${trFmt(g.buzz)}</span></div>
-        <div class="gap-bar-track"><div class="gap-bar-fill" style="width:\${buzzPct}%;background:\${barCol}"></div></div>
+        <div class="gap-bar-label"><span>아시아 비중</span><span>${asianPct}%</span></div>
+        <div class="gap-bar-track"><div class="gap-bar-fill" style="width:${asianPct}%;background:${barCol}"></div></div>
       </div>
-      <div class="gap-opportunity">\${opportunity}</div>
-    </div>\`;
+      <div class="gap-opportunity">${opportunity}</div>
+    </div>`;
   }).join('');
 }
 
@@ -3936,46 +4370,54 @@ async function trLoadCreators() {
     else              { tier = 'tier-emerging';      tierLabel = 'Emerging';     tierEmoji = '🔵'; }
 
     const avatar = c.avatar
-      ? \`<img class="cr-avatar" src="\${vEsc(c.avatar)}" onerror="this.style.display='none'">\`
-      : \`<div class="cr-avatar-ph">👤</div>\`;
+      ? `<img class="cr-avatar" src="${vEsc(c.avatar)}" onerror="this.style.display='none'">`
+      : `<div class="cr-avatar-ph">👤</div>`;
 
     const verified = c.verified
-      ? \`<span style="background:#1d9bf0;color:white;font-size:0.6rem;padding:1px 6px;border-radius:8px;font-weight:700">✓</span>\`
+      ? `<span style="background:#1d9bf0;color:white;font-size:0.6rem;padding:1px 6px;border-radius:8px;font-weight:700">✓</span>`
       : '';
 
     const kwHtml = (c.keywords || []).map(k =>
-      \`<span class="cr-kw">\${vEsc(k)}</span>\`
+      `<span class="cr-kw">${vEsc(k)}</span>`
     ).join('');
 
-    const tweet = c.top_tweet || {};
-    const tweetText = (tweet.text || '').replace(/https?:\/\/\S+/g, '').trim().slice(0, 120);
+    const vid = c.top_video || {};
+    const caption = (vid.caption || '').replace(/https?:\/\/\S+/g, '').trim().slice(0, 120);
+    const cover = vid.cover || '';
 
     const signalPct = Math.round(c.signal_score / maxSignal * 100);
 
-    return \`<div class="cr-card \${tier}">
+    return `<div class="cr-card ${tier}">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
-        <span class="cr-signal-badge \${tier}">\${tierEmoji} \${tierLabel} · SIGNAL \${signalPct}</span>
-        <span style="font-size:0.7rem;color:#aaa">#\${i+1}</span>
+        <span class="cr-signal-badge ${tier}">${tierEmoji} ${tierLabel} · SIGNAL ${signalPct}</span>
+        <span style="font-size:0.7rem;color:#aaa">#${i+1}</span>
       </div>
       <div class="cr-header">
-        \${avatar}
+        ${avatar}
         <div class="cr-meta">
-          <div class="cr-name">\${vEsc(c.name)}\${verified}</div>
-          <div class="cr-handle">@\${vEsc(c.username)} · \${trFmt(c.followers)} 팔로워</div>
+          <div class="cr-name">${vEsc(c.name)}${verified}</div>
+          <div class="cr-handle">@${vEsc(c.username)} · ${trFmt(c.followers)} 팔로워</div>
         </div>
       </div>
       <div class="cr-stats">
-        <div class="cr-stat"><div class="sv">\${er.toFixed(1)}%</div><div class="sl">평균 ER</div></div>
-        <div class="cr-stat"><div class="sv">\${trFmt(tweet.likes||0)}</div><div class="sl">최고 좋아요</div></div>
-        <div class="cr-stat"><div class="sv">\${trFmt(c.total_views||0)}</div><div class="sl">총 뷰</div></div>
+        <div class="cr-stat"><div class="sv">${er.toFixed(1)}%</div><div class="sl">평균 ER</div></div>
+        <div class="cr-stat"><div class="sv">${trFmt(vid.likes||0)}</div><div class="sl">베스트 좋아요</div></div>
+        <div class="cr-stat"><div class="sv">${trFmt(c.total_views||0)}</div><div class="sl">총 뷰</div></div>
       </div>
-      \${tweetText ? \`<div class="cr-tweet">\${vEsc(tweetText)}</div>\` : ''}
-      \${kwHtml ? \`<div class="cr-keywords">\${kwHtml}</div>\` : ''}
+      ${cover ? `<a href="${vEsc(vid.url||'#')}" target="_blank" style="display:block;margin-bottom:8px"><img src="${vEsc(cover)}" style="width:100%;border-radius:10px;object-fit:cover;max-height:140px" onerror="this.style.display='none'"></a>` : ''}
+      ${caption ? `<div class="cr-tweet">${vEsc(caption)}</div>` : ''}
+      ${kwHtml ? `<div class="cr-keywords">${kwHtml}</div>` : ''}
+      <div style="display:flex;gap:12px;font-size:0.72rem;color:#aaa;margin-bottom:8px">
+        <span>👁 ${trFmt(vid.views||0)}</span>
+        <span>❤️ ${trFmt(vid.likes||0)}</span>
+        <span>💬 ${trFmt(vid.comments||0)}</span>
+        <span>🔖 ${trFmt(vid.saves||0)}</span>
+      </div>
       <div class="cr-footer">
-        <a class="cr-link" href="\${vEsc(c.url||'#')}" target="_blank">X에서 보기 →</a>
-        <span class="cr-er">ER \${er.toFixed(1)}%</span>
+        <a class="cr-link" href="${vEsc(c.url||'#')}" target="_blank">TikTok에서 보기 →</a>
+        <span class="cr-er">ER ${er.toFixed(1)}%</span>
       </div>
-    </div>\`;
+    </div>`;
   }).join('');
 }
 
@@ -3986,7 +4428,419 @@ function trFmt(n) {
   return n.toString();
 }
 
+/* ── 순위 변동 패널 ──────────────────────────────────── */
+let rcPeriod = '1d';
+let rcCountry = '';
+let rcData = null;
+
+function rcOpen() {
+  // 현재 보고 있는 국가 탭에 맞게 자동 필터
+  const cur = (typeof country !== 'undefined' && country !== 'ALL' && country !== 'DB') ? country : '';
+  if (rcCountry !== cur) { rcData = null; }
+  rcCountry = cur;
+  document.getElementById('rank-change-panel').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+  if (!rcData) rcLoad();
+}
+function rcClose() {
+  document.getElementById('rank-change-panel').style.display = 'none';
+  document.body.style.overflow = '';
+}
+function rcSetPeriod(p, btn) {
+  rcPeriod = p;
+  rcData = null;
+  rcCountry = '';
+  document.querySelectorAll('.rc-period-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  rcLoad();
+}
+function rcSetCountry(c, btn) {
+  rcCountry = c;
+  document.querySelectorAll('.rc-ctry-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  rcRender();
+}
+
+const SHOP_META = {
+  'US': {name:'Amazon US',  icon:'🛒', flag:'🇺🇸'},
+  'UK': {name:'Amazon UK',  icon:'🛒', flag:'🇬🇧'},
+  'JP': {name:'Amazon JP',  icon:'🛒', flag:'🇯🇵'},
+  'OY': {name:'OliveYoung', icon:'🌿', flag:'🌿'},
+  'YS': {name:'YesStyle',   icon:'✨', flag:'✨'},
+  'TT': {name:'TikTok Shop',icon:'🎵', flag:'🎵'},
+  'QJ': {name:'Qoo10 Japan',icon:'🛍️', flag:'🛍️'},
+};
+function rcShopLabel(cc) {
+  const m = SHOP_META[cc];
+  return m ? `${m.flag} ${m.name}` : cc;
+}
+
+async function rcLoad() {
+  const body = document.getElementById('rc-body');
+  body.innerHTML = '<div style="text-align:center;padding:40px;color:#aaa">분석 중...</div>';
+  try {
+    const r = await fetch('/api/rankings/changes?period=' + rcPeriod);
+    rcData = await r.json();
+  } catch(e) { rcData = {risen:[],fallen:[],new:[]}; }
+
+  if (rcData.compare_date) {
+    document.getElementById('rc-compare-label').textContent =
+      `비교: ${rcData.compare_date} → ${rcData.current_date || '현재'}`;
+  } else {
+    document.getElementById('rc-compare-label').textContent =
+      rcData.message || '이전 스냅샷 없음 — 매일 새로고침 시 자동 누적됩니다';
+  }
+
+  // 샵 필터 버튼 생성 (데이터에 있는 샵만)
+  const allItems = [...(rcData.risen||[]), ...(rcData.fallen||[]), ...(rcData.new||[])];
+  const shopCodes = [...new Set(allItems.map(c => c.country).filter(Boolean))];
+  // 고정 순서: US, UK, JP, OY, YS, TT, QJ
+  const ordered = ['US','UK','JP','OY','YS','TT','QJ'].filter(c => shopCodes.includes(c));
+  const filter = document.getElementById('rc-country-filter');
+  filter.innerHTML = ['', ...ordered].map((cc, i) => {
+    const label = cc ? rcShopLabel(cc) : '전체';
+    const active = (i === 0 && !rcCountry) || cc === rcCountry ? ' active' : '';
+    return `<button class="rc-ctry-btn${active}" onclick="rcSetCountry('${cc}',this)">${label}</button>`;
+  }).join('');
+
+  rcRender();
+}
+
+function rcRender() {
+  const body = document.getElementById('rc-body');
+  if (!rcData) return;
+
+  if (!rcData.compare_date) {
+    body.innerHTML = `<div style="text-align:center;padding:50px;color:#94a3b8">
+      <div style="font-size:2rem;margin-bottom:12px">📸</div>
+      <div style="font-weight:700;margin-bottom:6px">아직 비교할 이전 데이터가 없어요</div>
+      <div style="font-size:0.82rem">매일 새로고침하면 자동으로 스냅샷이 쌓여요.<br>내일부터 1일 변동, 7일 후엔 1주일 변동을 볼 수 있어요!</div>
+    </div>`;
+    return;
+  }
+
+  const risen  = rcData.risen  || [];
+  const fallen = rcData.fallen || [];
+  const newE   = rcData.new    || [];
+
+  const card = (c) => {
+    const m = SHOP_META[c.country] || {};
+    const shopLabel = m.name || c.country;
+    const shopIcon  = m.icon || c.flag || '';
+    const thumb = c.thumb
+      ? `<img class="rc-thumb" src="${vEsc(c.thumb)}" onerror="this.style.display='none'">`
+      : `<div class="rc-thumb-ph">🛒</div>`;
+    let badge = '';
+    if (c.is_new) badge = `<span class="rc-badge-new">🆕 신규</span>`;
+    else if (c.change > 0) badge = `<span class="rc-badge-up">▲ ${c.change}</span>`;
+    else badge = `<span class="rc-badge-down">▼ ${Math.abs(c.change)}</span>`;
+    const rank = c.is_new ? `현재 #${c.rank}` : `#${c.prev_rank} → #${c.rank}`;
+    return `<div class="rc-card">
+      ${thumb}
+      <div style="flex:1;min-width:0">
+        <div style="font-size:0.7rem;color:#94a3b8;margin-bottom:2px">${shopIcon} ${shopLabel} · ${vEsc(c.category||'')}</div>
+        <div style="font-size:0.82rem;font-weight:700;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${vEsc(c.name||'')}">${vEsc((c.name||'').slice(0,55))}</div>
+        <div style="font-size:0.72rem;color:#64748b;margin-top:2px">${rank}</div>
+      </div>
+      ${badge}
+    </div>`;
+  };
+
+  // 특정 샵 선택 시: 해당 샵만 상승/하락/신규 3섹션
+  if (rcCountry) {
+    const f = c => c.country === rcCountry;
+    const rr = risen.filter(f), ff = fallen.filter(f), nn = newE.filter(f);
+    let html = '';
+    if (rr.length) html += `<div class="rc-section-title"><span style="color:#16a34a">▲</span> 순위 상승 (${rr.length}개)</div><div class="rc-grid">${rr.map(card).join('')}</div>`;
+    if (ff.length) html += `<div class="rc-section-title"><span style="color:#dc2626">▼</span> 순위 하락 (${ff.length}개)</div><div class="rc-grid">${ff.map(card).join('')}</div>`;
+    if (nn.length) html += `<div class="rc-section-title"><span style="color:#7c3aed">🆕</span> 신규 진입 (${nn.length}개)</div><div class="rc-grid">${nn.map(card).join('')}</div>`;
+    if (!html) html = '<div style="text-align:center;padding:40px;color:#aaa">변동 없음</div>';
+    body.innerHTML = html;
+    return;
+  }
+
+  // 전체 보기: 샵별 섹션으로 구조화
+  const allItems = [...risen, ...fallen, ...newE];
+  const shopCodes = ['US','UK','JP','OY','YS','TT','QJ'].filter(cc =>
+    allItems.some(c => c.country === cc)
+  );
+
+  if (!shopCodes.length) {
+    body.innerHTML = '<div style="text-align:center;padding:40px;color:#aaa">변동 없음</div>';
+    return;
+  }
+
+  let html = '';
+  for (const cc of shopCodes) {
+    const m = SHOP_META[cc] || {};
+    const rr = risen.filter(c => c.country === cc).slice(0, 5);
+    const ff = fallen.filter(c => c.country === cc).slice(0, 5);
+    const nn = newE.filter(c => c.country === cc).slice(0, 3);
+    if (!rr.length && !ff.length && !nn.length) continue;
+    const total = rr.length + ff.length + nn.length;
+    html += `<div style="margin-bottom:24px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;padding-bottom:8px;border-bottom:2px solid #f1f5f9">
+        <div style="font-weight:800;font-size:0.95rem;color:#1e293b">${m.icon||''} ${m.name||cc}</div>
+        <div style="font-size:0.72rem;color:#94a3b8">
+          ${rr.length ? `<span style="color:#16a34a">▲${rr.length}</span>` : ''}
+          ${ff.length ? `<span style="color:#dc2626;margin-left:6px">▼${ff.length}</span>` : ''}
+          ${nn.length ? `<span style="color:#7c3aed;margin-left:6px">🆕${nn.length}</span>` : ''}
+          <button style="margin-left:10px;font-size:0.7rem;padding:2px 8px;border-radius:8px;border:1px solid #e2e8f0;background:white;cursor:pointer;color:#2d3561"
+            onclick="rcSetCountry('${cc}',null)">전체 보기</button>
+        </div>
+      </div>
+      <div class="rc-grid">${[...rr,...ff,...nn].map(card).join('')}</div>
+    </div>`;
+  }
+  body.innerHTML = html || '<div style="text-align:center;padding:40px;color:#aaa">변동 없음</div>';
+}
+
+function brRenderChart(sorted) {
+  const top = sorted.slice(0, 15);
+  const labels = top.map(d => d.brand);
+
+  const metricKey = trBrandsSort === 'count' ? 'count'
+                  : trBrandsSort === 'trend'  ? 'recent_count'
+                  : 'total_views';
+  const values = top.map(d => d[metricKey]);
+
+  const colors = top.map(d => {
+    const ratio = d.recent_count / Math.max(d.count - d.recent_count, 1);
+    if (ratio >= 2) return 'rgba(239,68,68,0.75)';
+    if (ratio >= 1) return 'rgba(217,119,6,0.75)';
+    return 'rgba(79,70,229,0.75)';
+  });
+
+  const axisLabel = metricKey === 'total_views' ? '총 뷰'
+                  : metricKey === 'count'        ? '영상 수'
+                  : '최근 영상 수';
+
+  if (brChartInstance) { brChartInstance.destroy(); brChartInstance = null; }
+
+  const canvas = document.getElementById('br-chart-canvas');
+  canvas.height = Math.max(320, top.length * 36);
+
+  brChartInstance = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: axisLabel,
+        data: values,
+        backgroundColor: colors,
+        borderRadius: 6,
+        borderSkipped: false,
+      }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const v = ctx.raw;
+              if (metricKey === 'total_views') return ' ' + trFmt(v) + ' 뷰';
+              return ' ' + v + '개';
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks: {
+            callback: v => metricKey === 'total_views' ? trFmt(v) : v,
+            font: { size: 11 }
+          },
+          grid: { color: 'rgba(0,0,0,0.05)' }
+        },
+        y: {
+          ticks: { font: { size: 12, weight: '700' } },
+          grid: { display: false }
+        }
+      }
+    }
+  });
+}
+
+/* ── 브랜드 버즈 ──────────────────────────────────────── */
+async function trLoadBrands() {
+  const grid  = document.getElementById('tr-brands-grid');
+  const empty = document.getElementById('tr-brands-empty');
+  grid.innerHTML = '<div style="padding:40px;text-align:center;color:#aaa;font-size:0.85rem">브랜드 분석 중...</div>';
+  empty.style.display = 'none';
+  try {
+    const r = await fetch('/api/trends/brands');
+    trBrandsData = await r.json();
+  } catch(e) { trBrandsData = []; }
+  brRenderBrands();
+}
+
+function brSetSort(key, btn) {
+  trBrandsSort = key;
+  document.querySelectorAll('.br-sort-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  brRenderBrands();
+}
+
+function brSetView(view, btn) {
+  trBrandsView = view;
+  document.querySelectorAll('.br-view-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  brRenderBrands();
+}
+
+function brRenderBrands() {
+  const grid  = document.getElementById('tr-brands-grid');
+  const chartBox = document.getElementById('tr-brands-chart');
+  const empty = document.getElementById('tr-brands-empty');
+
+  if (!trBrandsData.length) {
+    grid.style.display = 'none';
+    chartBox.style.display = 'none';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+
+  const sorted = [...trBrandsData].sort((a, b) => {
+    if (trBrandsSort === 'count') return b.count - a.count;
+    if (trBrandsSort === 'trend') {
+      const ts = d => d.recent_count / Math.max(d.count - d.recent_count, 1);
+      return ts(b) - ts(a);
+    }
+    return b.total_views - a.total_views;
+  });
+
+  if (trBrandsView === 'chart') {
+    grid.style.display = 'none';
+    chartBox.style.display = '';
+    brRenderChart(sorted);
+    return;
+  }
+  chartBox.style.display = 'none';
+  grid.style.display = '';
+
+  const BRAND_COLORS = [
+    '#e91e63','#9c27b0','#3f51b5','#2196f3','#00bcd4',
+    '#009688','#4caf50','#ff9800','#ff5722','#795548',
+  ];
+
+  grid.innerHTML = sorted.map((d, i) => {
+    const ratio = d.recent_count / Math.max(d.count - d.recent_count, 1);
+    let trendCls, trendLabel;
+    if (ratio >= 2)      { trendCls = 'hot';    trendLabel = '🔥 급상승'; }
+    else if (ratio >= 1) { trendCls = 'up';     trendLabel = '↑ 상승중'; }
+    else                 { trendCls = 'stable'; trendLabel = '→ 안정적'; }
+
+    const color = BRAND_COLORS[i % BRAND_COLORS.length];
+    const initials = d.brand.replace(/[^a-z0-9]/gi,'').slice(0,2).toUpperCase();
+    const tv = d.top_video || {};
+    const caption = (tv.caption || '').replace(/https?:\/\/\S+/g,'').trim().slice(0,100);
+
+    return `<div class="br-card" onclick="brShowVideos('${d.brand.replace(/'/g,"\\'")}')"
+      style="cursor:pointer" title="${vEsc(d.brand)} 영상 보기">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:38px;height:38px;border-radius:50%;background:${color};color:white;
+               display:flex;align-items:center;justify-content:center;font-weight:800;font-size:0.85rem">
+            ${initials}
+          </div>
+          <div>
+            <div style="font-weight:700;font-size:0.92rem;color:#1e293b">${vEsc(d.brand)}</div>
+            <div style="font-size:0.7rem;color:#94a3b8">#${i+1} · ${d.recent_count}개 최근영상</div>
+          </div>
+        </div>
+        <span class="br-trend ${trendCls}">${trendLabel}</span>
+      </div>
+
+      <div class="br-stats">
+        <div class="br-stat"><div class="sv">${trFmt(d.total_views)}</div><div class="sl">총 뷰</div></div>
+        <div class="br-stat"><div class="sv">${d.count}</div><div class="sl">영상 수</div></div>
+        <div class="br-stat"><div class="sv">${d.recent_count}</div><div class="sl">최근 7일</div></div>
+      </div>
+
+      ${tv.cover ? `<a href="${vEsc(tv.url||'#')}" target="_blank">
+        <img class="br-thumb" src="${vEsc(tv.cover)}" onerror="this.style.display='none'">
+      </a>` : ''}
+      ${caption ? `<div class="br-vcap">${vEsc(caption)}</div>` : ''}
+
+      <div class="br-footer">
+        ${tv.url ? `<a class="cr-link" href="${vEsc(tv.url)}" target="_blank">TikTok에서 보기 →</a>` : '<span></span>'}
+        ${tv.creator ? `<span style="font-size:0.72rem;color:#94a3b8">@${vEsc(tv.creator)}</span>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+/* ── 브랜드 영상 모달 ──────────────────────────────────── */
+async function brShowVideos(brand) {
+  const modal = document.getElementById('br-modal');
+  const title = document.getElementById('br-modal-title');
+  const body  = document.getElementById('br-modal-body');
+  title.textContent = '🏷️ ' + brand + ' 언급 영상';
+  body.innerHTML = '<div style="text-align:center;padding:40px;color:#aaa">불러오는 중...</div>';
+  modal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+
+  try {
+    const r = await fetch('/api/trends/brands/videos?brand=' + encodeURIComponent(brand));
+    const videos = await r.json();
+    if (!videos.length) {
+      body.innerHTML = '<div style="text-align:center;padding:40px;color:#aaa">영상 없음</div>';
+      return;
+    }
+    body.innerHTML = videos.map(v => {
+      const cap = (v.caption || '').replace(/https?:\/\/\S+/g,'').trim().slice(0,160);
+      return `<div style="display:flex;gap:14px;padding:16px 0;border-bottom:1px solid #f1f5f9">
+        ${v.cover ? `<a href="${vEsc(v.url||'#')}" target="_blank" style="flex-shrink:0">
+          <img src="${vEsc(v.cover)}" style="width:90px;height:120px;object-fit:cover;border-radius:10px" onerror="this.style.display='none'">
+        </a>` : ''}
+        <div style="flex:1;min-width:0">
+          <div style="font-size:0.72rem;color:#94a3b8;margin-bottom:4px">${vEsc(v.date)} · @${vEsc(v.creator||'')}</div>
+          ${cap ? `<div style="font-size:0.83rem;color:#334155;line-height:1.5;margin-bottom:8px">${vEsc(cap)}</div>` : ''}
+          <div style="display:flex;gap:14px;font-size:0.75rem;color:#64748b;flex-wrap:wrap">
+            <span>👁 ${trFmt(v.views)}</span>
+            <span>❤️ ${trFmt(v.likes)}</span>
+            <span>💬 ${trFmt(v.comments)}</span>
+            <span>🔖 ${trFmt(v.saves)}</span>
+          </div>
+          ${v.url ? `<a href="${vEsc(v.url)}" target="_blank"
+            style="display:inline-block;margin-top:8px;font-size:0.75rem;color:#2d3561;font-weight:700;text-decoration:none">
+            TikTok에서 보기 →</a>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    body.innerHTML = '<div style="text-align:center;padding:40px;color:#aaa">로드 실패</div>';
+  }
+}
+
+function brCloseModal() {
+  document.getElementById('br-modal').style.display = 'none';
+  document.body.style.overflow = '';
+}
+
 </script>
+
+<!-- 브랜드 영상 모달 -->
+<div id="br-modal" style="display:none;position:fixed;inset:0;z-index:9999;
+  background:rgba(0,0,0,0.55);align-items:center;justify-content:center;padding:16px"
+  onclick="if(event.target===this)brCloseModal()">
+  <div style="background:white;border-radius:18px;width:100%;max-width:560px;
+    max-height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.25)">
+    <div style="display:flex;align-items:center;justify-content:space-between;
+      padding:18px 20px;border-bottom:1px solid #f1f5f9;flex-shrink:0">
+      <div id="br-modal-title" style="font-weight:800;font-size:1rem;color:#1e293b"></div>
+      <button onclick="brCloseModal()"
+        style="border:none;background:none;font-size:1.3rem;cursor:pointer;color:#94a3b8;line-height:1">✕</button>
+    </div>
+    <div id="br-modal-body" style="overflow-y:auto;padding:0 20px 20px"></div>
+  </div>
+</div>
+
 </body>
 </html>
 """
