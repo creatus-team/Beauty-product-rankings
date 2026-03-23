@@ -2,19 +2,20 @@ name: K-Beauty Daily Scrape
 
 on:
   schedule:
-    - cron: "0 0 * * *"   # 매일 오전 9시 KST (= UTC 00:00)
-  workflow_dispatch:        # 수동 실행 버튼
+    - cron: "0 0 * * *"     # 매일 오전 9시 KST — Product 새로고침 + Twitter
+    - cron: "0 0 * * 1,4"   # 월/목 오전 9시 KST — TikTok 수집 추가
+  workflow_dispatch:          # 수동 실행 버튼
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 90
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GH_PAT }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -29,17 +30,37 @@ jobs:
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
         run: python twitter_scraper.py
 
-      - name: Commit Twitter data
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add twitter_*.json
-          git diff --staged --quiet || git commit -m "auto: daily twitter JP data $(date +'%Y-%m-%d')"
-          git push
+      # TikTok 수집 — 월/목만 실행 (비용 절감)
+      - name: Run TikTok K-beauty scraper (월/목만)
+        if: github.event.schedule == '0 0 * * 1,4' || github.event_name == 'workflow_dispatch'
+        env:
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+        run: python kbeauty_daily.py
 
       - name: Refresh Vercel product data (Amazon/OY/YS/TT)
         run: |
-          sleep 60
           curl -s -X POST https://kbeautyresearch.vercel.app/api/refresh \
             -H "Content-Type: application/json" \
-            --max-time 120 | python3 -c "import sys,json; d=json.load(sys.stdin); print('✅ Products:', d.get('count'), 'updated_at:', d.get('updated_at'))"
+            --max-time 180 | python3 -c "import sys,json; d=json.load(sys.stdin); print('✅ Products:', d.get('count'), 'updated_at:', d.get('updated_at'))"
+
+      - name: Download fresh amazon_cache.json from Vercel
+        run: |
+          curl -s "https://kbeautyresearch.vercel.app/api/data" --max-time 60 | \
+            python3 -c 'import sys,json; d=json.load(sys.stdin); open("amazon_cache.json","w",encoding="utf-8").write(json.dumps(d,ensure_ascii=False,indent=2)); print("amazon_cache.json saved:",d.get("updated_at"))'
+
+      - name: Commit all daily data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add twitter_*.json data_*.json amazon_cache.json rankings_*.json
+          git diff --staged --quiet || git commit -m "auto: daily data update $(date +'%Y-%m-%d')"
+          git push
+
+      - name: Deploy to Vercel
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          npm install -g vercel
+          vercel --prod --token $VERCEL_TOKEN --yes
