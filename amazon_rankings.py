@@ -660,6 +660,28 @@ def api_data_date(date):
     with open(path, encoding="utf-8") as f:
         return jsonify(json.load(f))
 
+@app.route("/api/apify/usage")
+def api_apify_usage():
+    """Apify 이번 달 크레딧 사용량 조회"""
+    token = os.getenv("APIFY_TOKEN", "")
+    if not token:
+        return jsonify({"error": "no token"})
+    try:
+        r = requests.get(f"https://api.apify.com/v2/users/me?token={token}", timeout=8)
+        d = r.json().get("data", {})
+        plan = d.get("plan", {})
+        usage = d.get("monthlyUsage", {})
+        limit = plan.get("monthlyUsageCreditsUsd", 0)
+        used  = usage.get("totalUsd", 0)
+        return jsonify({
+            "used": round(used, 2),
+            "limit": round(limit, 2),
+            "remaining": round(limit - used, 2),
+            "pct": round(used / limit * 100, 1) if limit else 0,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
 @app.route("/api/run", methods=["POST"])
 def api_run():
     """GitHub Actions workflow_dispatch 트리거 — Apify는 GitHub Actions에서만 실행"""
@@ -1884,6 +1906,12 @@ select.fs:focus{border-color:var(--pink);background:#fff}
       <button class="plat-btn tiktok-btn active" id="btn-tiktok" onclick="vSwitchPlatform('tiktok')">🎵 TikTok</button>
       <button class="plat-btn twitter-btn" id="btn-twitter" onclick="vSwitchPlatform('twitter')">🇯🇵 JP Twitter</button>
     </div>
+    <div id="apify-credit-badge" style="font-size:0.75rem;color:rgba(255,255,255,0.75);cursor:pointer;text-align:right;line-height:1.4" onclick="vLoadApifyUsage()" title="클릭하여 갱신">
+      <div style="font-weight:700" id="apify-used">💳 로딩중...</div>
+      <div id="apify-bar" style="width:80px;height:4px;background:rgba(255,255,255,0.2);border-radius:2px;margin-top:2px">
+        <div id="apify-bar-fill" style="height:100%;border-radius:2px;background:#4ade80;width:0%;transition:width 0.5s"></div>
+      </div>
+    </div>
     <button class="run-btn" id="v-run-btn" onclick="vTriggerScrape()">Run New Scrape</button>
   </div>
 </div>
@@ -3083,6 +3111,7 @@ async function initVideoHub() {
     return;
   }
   await vLoadAllData();
+  vLoadApifyUsage();
 }
 
 async function vLoadAllData() {
@@ -3780,6 +3809,20 @@ function vRenderAudio() {
        '<td>'+vFmt(d.views)+'</td>' +
        '<td>'+vFmt(d.likes)+'</td></tr>'
     ).join('') + '</tbody></table></div>';
+}
+
+// ── Apify 크레딧 표시 ──
+async function vLoadApifyUsage() {
+  try {
+    const d = await fetch('/api/apify/usage').then(r=>r.json());
+    if (d.error) { document.getElementById('apify-used').textContent = '💳 —'; return; }
+    const pct = d.pct;
+    const color = pct > 85 ? '#f87171' : pct > 60 ? '#fbbf24' : '#4ade80';
+    document.getElementById('apify-used').textContent =
+      `💳 $${d.used}/$${d.limit} (${pct}%)`;
+    document.getElementById('apify-bar-fill').style.width = Math.min(pct,100)+'%';
+    document.getElementById('apify-bar-fill').style.background = color;
+  } catch(e) {}
 }
 
 // ── Scrape status banner ──
