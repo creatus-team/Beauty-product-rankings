@@ -685,9 +685,9 @@ def api_apify_usage():
 @app.route("/api/run", methods=["POST"])
 def api_run():
     """GitHub Actions workflow_dispatch 트리거 — Apify는 GitHub Actions에서만 실행"""
-    gh_token = os.getenv("GITHUB_PAT", "")
+    gh_token = os.getenv("GH_PAT", "")
     if not gh_token:
-        return jsonify({"ok": False, "error": "GITHUB_PAT not set"}), 500
+        return jsonify({"ok": False, "error": "GH_PAT not set"}), 500
     resp = requests.post(
         "https://api.github.com/repos/creatus-team/Beauty-product-rankings/actions/workflows/daily_scrape.yml/dispatches",
         headers={"Authorization": f"token {gh_token}", "Accept": "application/vnd.github+json"},
