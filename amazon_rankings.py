@@ -688,15 +688,18 @@ def api_run():
     gh_token = os.getenv("GH_PAT", "")
     if not gh_token:
         return jsonify({"ok": False, "error": "GH_PAT not set"}), 500
-    resp = requests.post(
-        "https://api.github.com/repos/creatus-team/Beauty-product-rankings/actions/workflows/daily_scrape.yml/dispatches",
-        headers={"Authorization": f"token {gh_token}", "Accept": "application/vnd.github+json"},
-        json={"ref": "main"},
-        timeout=15,
-    )
-    if resp.status_code == 204:
-        return jsonify({"ok": True, "msg": "GitHub Actions triggered"})
-    return jsonify({"ok": False, "error": resp.text}), 500
+    try:
+        resp = requests.post(
+            "https://api.github.com/repos/creatus-team/Beauty-product-rankings/actions/workflows/daily_scrape.yml/dispatches",
+            headers={"Authorization": f"token {gh_token}", "Accept": "application/vnd.github+json"},
+            json={"ref": "main"},
+            timeout=8,
+        )
+        if resp.status_code == 204:
+            return jsonify({"ok": True, "msg": "GitHub Actions triggered"})
+        return jsonify({"ok": False, "error": resp.text}), 500
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 TWITTER_ACTOR_ID = "CJdippxWmn9uRfooo"
 _TW_TMP = "/tmp/twitter_apify_cache.json"
