@@ -3782,32 +3782,89 @@ function vRenderAudio() {
     ).join('') + '</tbody></table></div>';
 }
 
+// ── Scrape status banner ──
+function vShowScrapeBar(msg, done=false) {
+  let bar = document.getElementById('v-scrape-bar');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'v-scrape-bar';
+    bar.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:9999;' +
+      'background:#1e293b;color:#fff;padding:14px 24px;border-radius:12px;font-size:0.88rem;' +
+      'font-weight:600;display:flex;align-items:center;gap:10px;box-shadow:0 4px 20px rgba(0,0,0,0.3);' +
+      'min-width:280px;justify-content:center;transition:opacity 0.4s';
+    document.body.appendChild(bar);
+  }
+  bar.style.opacity = '1';
+  bar.style.background = done ? '#16a34a' : '#1e293b';
+  bar.innerHTML = done
+    ? '✅ ' + msg
+    : '<span style="display:inline-block;animation:spin 1s linear infinite;font-size:1rem">⏳</span> ' + msg;
+  if (done) setTimeout(() => { bar.style.opacity='0'; setTimeout(()=>bar.remove(),400); }, 4000);
+}
+function vHideScrapeBar() {
+  const bar = document.getElementById('v-scrape-bar');
+  if (bar) { bar.style.opacity='0'; setTimeout(()=>bar.remove(),400); }
+}
+
 // ── Scrape trigger ──
 async function vTriggerScrape() {
   const btn = document.getElementById('v-run-btn');
-  btn.disabled = true; btn.textContent = 'Running...';
+  btn.disabled = true; btn.textContent = '수집 중...';
   const endpoint = vPlatform === 'twitter' ? '/api/run/twitter' : '/api/run';
-  vToast('Scrape started — takes ~5-10 min. Page will refresh when done.', 10000);
+
+  // 브라우저 알림 권한 요청
+  if (Notification.permission === 'default') await Notification.requestPermission();
+
   const r = await fetch(endpoint, { method: 'POST' });
-  await r.json();
+  const result = await r.json();
+  if (!result.ok) {
+    vShowScrapeBar('오류: ' + (result.error || '실행 실패'), true);
+    btn.disabled = false; btn.textContent = 'Run New Scrape'; return;
+  }
+
+  const startTime = Date.now();
+  vShowScrapeBar('GitHub Actions 수집 중 — 완료 시 자동 업데이트');
+
+  // 경과 시간 표시 타이머
+  const ticker = setInterval(() => {
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    const mm = String(Math.floor(elapsed/60)).padStart(2,'0');
+    const ss = String(elapsed%60).padStart(2,'0');
+    vShowScrapeBar(`GitHub Actions 수집 중 — ${mm}:${ss} 경과`);
+  }, 1000);
+
+  // 최대 20분간 30초마다 새 데이터 감지
+  let checks = 0;
   const poll = setInterval(async () => {
-    if (vPlatform === 'tiktok') {
-      const dr = await fetch('/api/dates');
-      const dates = await dr.json();
-      if (dates[0] !== vAllDates[0]) {
-        clearInterval(poll);
-        btn.disabled = false; btn.textContent = 'Run New Scrape';
-        vAllDates = dates; await vLoadAllData(); vToast('New TikTok data loaded!', 4000);
-      }
-    } else {
-      const dr = await fetch('/api/x/dates');
-      const dates = await dr.json();
-      if (dates[0] !== vxAllDates[0]) {
-        clearInterval(poll);
-        btn.disabled = false; btn.textContent = 'Run New Scrape';
-        vxAllDates = dates; await vLoadXAllData(); vToast('New Twitter data loaded!', 4000);
-      }
+    checks++;
+    if (checks > 40) { // 20분 타임아웃
+      clearInterval(poll); clearInterval(ticker);
+      vShowScrapeBar('시간 초과 — GitHub Actions 탭에서 확인하세요', true);
+      btn.disabled = false; btn.textContent = 'Run New Scrape'; return;
     }
+    try {
+      if (vPlatform === 'tiktok') {
+        const dates = await fetch('/api/dates').then(r=>r.json());
+        if (dates[0] !== vAllDates[0]) {
+          clearInterval(poll); clearInterval(ticker);
+          btn.disabled = false; btn.textContent = 'Run New Scrape';
+          vAllDates = dates; await vLoadAllData();
+          vShowScrapeBar('새 TikTok 데이터 로드 완료!', true);
+          if (Notification.permission === 'granted')
+            new Notification('K-Beauty Hub', { body: '✅ TikTok 수집 완료! 새 데이터가 업데이트됐어요.', icon: '/favicon.ico' });
+        }
+      } else {
+        const dates = await fetch('/api/x/dates').then(r=>r.json());
+        if (dates[0] !== vxAllDates[0]) {
+          clearInterval(poll); clearInterval(ticker);
+          btn.disabled = false; btn.textContent = 'Run New Scrape';
+          vxAllDates = dates; await vLoadXAllData();
+          vShowScrapeBar('새 Twitter 데이터 로드 완료!', true);
+          if (Notification.permission === 'granted')
+            new Notification('K-Beauty Hub', { body: '✅ Twitter 수집 완료! 새 데이터가 업데이트됐어요.', icon: '/favicon.ico' });
+        }
+      }
+    } catch(e) {}
   }, 30000);
 }
 
