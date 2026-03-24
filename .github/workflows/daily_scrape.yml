@@ -48,11 +48,18 @@ jobs:
           curl -s "https://kbeautyresearch.vercel.app/api/data" --max-time 60 | \
             python3 -c 'import sys,json; d=json.load(sys.stdin); open("amazon_cache.json","w",encoding="utf-8").write(json.dumps(d,ensure_ascii=False,indent=2)); print("amazon_cache.json saved:",d.get("updated_at"))'
 
+      # Slack 바이럴 다이제스트 — 월/목 TikTok 수집 후 또는 수동 실행 시
+      - name: Send viral TikTok digest to Slack
+        if: github.event.schedule == '0 0 * * 1,4' || github.event_name == 'workflow_dispatch'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: python slack_digest.py
+
       - name: Commit all daily data
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add twitter_*.json data_*.json amazon_cache.json rankings_*.json
+          git add twitter_*.json data_*.json amazon_cache.json rankings_*.json slack_sent.json
           git diff --staged --quiet || git commit -m "auto: daily data update $(date +'%Y-%m-%d')"
           git push
 
