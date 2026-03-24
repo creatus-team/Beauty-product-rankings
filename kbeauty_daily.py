@@ -8,7 +8,7 @@ import requests
 import time
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 
 # ── Config ──────────────────────────────────────────────────────────────────
@@ -16,20 +16,23 @@ APIFY_TOKEN = os.environ.get("APIFY_TOKEN", "")
 ACTOR_ID    = "GdWCkxBtKWOsKjdch"
 BASE_URL    = "https://api.apify.com/v2"
 
-# 주 2회(월/목) 실행 기준 — 1회 11개 실행 × $0.44 × 8.6회/월 ≈ $38/월
+# 주 2회(월/목) 실행 기준
+# 날짜 필터: 최근 14일 내 영상만 수집 → Actor가 오래된 영상 만나면 자동 중단 (비용 절감)
+# 주 2회 실행이므로 14일이면 충분 (30일은 동일 영상 8회 중복 수집)
+LOOKBACK_DAYS = 14
+
 KBEAUTY_HASHTAGS = [
-    # ── 핵심 버즈 (반드시 포함) ──
+    # ── 핵심 버즈 ──
     "kbeauty",
     "koreanskincare",
-    "koreanbeauty",
     "skintok",
     # ── 2026 트렌드 ──
     "skinbarrier",
     "kbeauty2026",
     # ── 바이럴 성분 ──
     "snailmucin",
-    # ── 룩 트렌드 ──
-    "glassskin",
+    # koreanbeauty 제거 (koreanskincare와 90% 중복)
+    # glassskin 제거 (에버그린 — 트렌드 변동 없음)
 ]
 
 # ── 키워드 검색 — 트렌드 발굴 핵심 3개 ──────────────────────────────────
@@ -39,8 +42,9 @@ KBEAUTY_KEYWORDS = [
     "korean skin trend",
 ]
 
-RESULTS_PER_HASHTAG = 150  # videos to pull per hashtag (Starter plan)
+RESULTS_PER_HASHTAG = 100  # 하드 캡 (날짜 필터가 더 일찍 멈추면 그보다 적게 나옴)
 RESULTS_PER_KEYWORD = 100  # videos to pull per keyword search
+MIN_VIEWS = 5_000           # 이 미만은 노이즈 — 저장하지 않음
 OUTPUT_DIR = os.path.dirname(os.path.abspath(__file__))
 TOP_N_VIDEOS = 30          # videos shown in digest
 TOP_N_CREATORS = 25        # creators shown in digest
@@ -48,12 +52,19 @@ TOP_N_CREATORS = 25        # creators shown in digest
 
 # ── Apify helpers ────────────────────────────────────────────────────────────
 
+def _oldest_post_date() -> str:
+    """최근 LOOKBACK_DAYS일 이전 날짜를 ISO 형식으로 반환."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=LOOKBACK_DAYS)
+    return cutoff.strftime("%Y-%m-%d")
+
+
 def start_run(hashtag: str) -> str:
     """Trigger one actor run for a single hashtag. Returns run ID."""
     url = f"{BASE_URL}/acts/{ACTOR_ID}/runs?token={APIFY_TOKEN}"
     payload = {
         "hashtags": [hashtag],
         "resultsPerPage": RESULTS_PER_HASHTAG,
+        "oldestPostDate": _oldest_post_date(),
         "shouldDownloadVideos": False,
         "shouldDownloadCovers": False,
         "shouldDownloadAvatars": False,
@@ -75,6 +86,7 @@ def start_keyword_run(keyword: str) -> str:
     payload = {
         "searchKeywords": [keyword],
         "resultsPerPage": RESULTS_PER_KEYWORD,
+        "oldestPostDate": _oldest_post_date(),
         "shouldDownloadVideos": False,
         "shouldDownloadCovers": False,
         "shouldDownloadAvatars": False,
@@ -221,17 +233,20 @@ def _collect_batch(run_queue: list[tuple[str, str, str]], all_videos: dict) -> N
             run_data   = wait_for_run(run_id)
             dataset_id = run_data["defaultDatasetId"]
             items      = fetch_dataset(dataset_id)
-            added = 0
+            added, skipped = 0, 0
             for item in items:
                 v = normalize_video(item, source_tag)
                 if not v or not v["id"]:
+                    continue
+                if v["stats"]["views"] < MIN_VIEWS:
+                    skipped += 1
                     continue
                 vid_id = v["id"]
                 # keep whichever copy has more views
                 if vid_id not in all_videos or v["stats"]["views"] > all_videos[vid_id]["stats"]["views"]:
                     all_videos[vid_id] = v
                     added += 1
-            print(f"  {label}: {len(items)} fetched, {added} new/updated")
+            print(f"  {label}: {len(items)} fetched, {added} kept, {skipped} skipped (<{MIN_VIEWS} views)")
         except Exception as e:
             print(f"  WARNING: Failed to collect {label}: {e}")
 
