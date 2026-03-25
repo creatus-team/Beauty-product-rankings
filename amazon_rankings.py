@@ -378,6 +378,9 @@ def fetch_tiktok():
                 sale_30d   = str(p.get('total_sale_30d_cnt') or '')
                 sale_7d    = str(p.get('total_sale_7d_cnt') or '')
                 cover = p.get('cover_url', '')
+                # hdnet CDN은 외부 핫링크 403 차단 → 빈값 처리하여 플레이스홀더 표시
+                if 'hdnet.workers.dev' in cover:
+                    cover = ''
                 product_url = f"https://shop.tiktok.com/view/product/{pid}" if pid else ''
                 items.append({
                     "name": name,
