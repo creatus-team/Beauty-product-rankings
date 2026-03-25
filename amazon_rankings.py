@@ -2499,6 +2499,10 @@ function renderDashboard() {
         <div class="db-card-title">🧪 트렌딩 성분 TOP 10 (전체) <span style="font-size:.7rem;font-weight:400;color:#bbb;margin-left:4px">↗ 클릭</span></div>
         <div class="db-ing-bars" id="dbIngBars"></div>
       </div>
+      <div class="db-chart-card">
+        <div class="db-card-title">🏷️ 브랜드 TOP 10 (전체)</div>
+        <div class="db-ing-bars" id="dbBrandBars"></div>
+      </div>
     </div>
   </div>`;
 }
@@ -2509,7 +2513,7 @@ function render() {
   if (country === 'DB') {
     toolbar.style.display = 'none';
     document.getElementById('gw').innerHTML = renderDashboard();
-    setTimeout(()=>{ drawDbPieChart(); drawDbIngChart(); }, 20);
+    setTimeout(()=>{ drawDbPieChart(); drawDbIngChart(); drawDbBrandChart(); }, 20);
     return;
   }
   if (country === 'CH') {
@@ -2979,6 +2983,86 @@ function drawDbPieChart() {
     });
   });
   legend.innerHTML=html;
+}
+
+const BRAND_LIST = [
+  {label:'medicube', re:/\bmedicube\b/i},
+  {label:'SKIN1004', re:/\bskin.?1004\b/i},
+  {label:'Anua', re:/\banua\b/i},
+  {label:'Torriden', re:/\btorriden\b/i},
+  {label:'COSRX', re:/\bcosrx\b/i},
+  {label:'Beauty of Joseon', re:/beauty.?of.?joseon/i},
+  {label:'celimax', re:/\bcelimax\b/i},
+  {label:'TIRTIR', re:/\btirtir\b/i},
+  {label:'Numbuzin', re:/\bnumbuzin\b/i},
+  {label:'MEDIHEAL', re:/\bmediheal\b/i},
+  {label:'CeraVe', re:/\bcerave\b/i},
+  {label:'Round Lab', re:/\bround.?lab\b/i},
+  {label:'Mixsoon', re:/\bmixsoon\b/i},
+  {label:'romand', re:/\bromand\b/i},
+  {label:'Laneige', re:/\blaneige\b/i},
+  {label:'innisfree', re:/\binnisfree\b/i},
+  {label:'BIODANCE', re:/\bbiodance\b/i},
+  {label:'Dr. Jart+', re:/dr\.?\s*jart/i},
+  {label:'SOME BY MI', re:/some.?by.?mi/i},
+  {label:'Neutrogena', re:/\bneutrogena\b/i},
+  {label:'The Ordinary', re:/\bthe.?ordinary\b/i},
+  {label:'Purito', re:/\bpurito\b/i},
+  {label:'Isntree', re:/\bisntree\b/i},
+  {label:'Sulwhasoo', re:/\bsulwhasoo\b/i},
+  {label:'Dr.Melaxin', re:/dr\.?melaxin/i},
+  {label:'Klairs', re:/\bklairs\b/i},
+  {label:'Etude', re:/\betude\b/i},
+  {label:'MISSHA', re:/\bmissha\b/i},
+  {label:'Banila Co', re:/\bbanila\b/i},
+  {label:'TonyMoly', re:/\btony.?moly\b/i},
+  {label:'VT Cosmetics', re:/\bvt\s?cosme|\bvtcosme/i},
+  {label:'Hero Cosmetics', re:/\bhero.?cosmetics\b|mighty.?patch/i},
+  {label:'Biore', re:/\bbiore\b/i},
+  {label:'Shiseido', re:/\bshiseido\b/i},
+  {label:'Canmake', re:/\bcanmake\b/i},
+  {label:'NIDA', re:/\bnida\b/i},
+];
+const BRAND_COLORS = ['#e8688a','#e88a9e','#d4768a','#c97d8a','#e89bb0','#d98ea0','#e0a0b0','#c4909a','#d0a0aa','#b8909a'];
+
+function drawDbBrandChart() {
+  const counts = {};
+  all.forEach(item => {
+    const text = item.name||'';
+    BRAND_LIST.forEach(({label,re}) => {
+      if (re.test(text)) {
+        counts[label] = (counts[label]||0) + 1;
+      }
+    });
+  });
+  const sorted = Object.entries(counts)
+    .map(([label,count])=>({label,count}))
+    .sort((a,b)=>b.count-a.count)
+    .slice(0,10);
+  const maxCount = sorted[0]?.count || 1;
+  const container = document.getElementById('dbBrandBars');
+  if (!container) return;
+  if (!sorted.length) {
+    container.innerHTML='<div style="color:var(--muted);font-size:.78rem;text-align:center;padding:12px">브랜드 데이터 없음</div>';
+    return;
+  }
+  container.innerHTML = sorted.map(({label,count},i)=>{
+    const pct = Math.round(count/maxCount*100);
+    const color = BRAND_COLORS[i%BRAND_COLORS.length];
+    return `<div class="db-ing-row" data-w="${pct}">
+      <div class="db-ing-label">${label}</div>
+      <div class="db-ing-track">
+        <div class="db-ing-fill" style="width:0%;background:${color}">
+          <span class="db-ing-cnt">${count}</span>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+  setTimeout(()=>{
+    container.querySelectorAll('.db-ing-row').forEach(row=>{
+      row.querySelector('.db-ing-fill').style.width = row.dataset.w + '%';
+    });
+  }, 40);
 }
 
 function drawDbIngChart() {
