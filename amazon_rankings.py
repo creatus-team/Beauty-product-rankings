@@ -1145,6 +1145,9 @@ HTML = r"""<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>🛒 Beauty Product Rankings</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&family=Noto+Sans+KR:wght@400;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -1153,8 +1156,11 @@ HTML = r"""<!DOCTYPE html>
   --bg:#fdf6f8;--surface:#fff;--border:#f0e0e5;--text:#1a1a1a;--muted:#888;
   --shadow:0 2px 12px rgba(232,99,122,.08);
 }
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans KR',sans-serif;
-     background:var(--bg);color:var(--text);min-height:100vh}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans KR',sans-serif;
+     background:var(--bg);color:var(--text);min-height:100vh;
+     -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;
+     text-rendering:optimizeLegibility}
+img{image-rendering:auto;-webkit-image-rendering:auto}
 
 /* header */
 header{background:linear-gradient(135deg,#e8637a 0%,#c0445f 100%);color:#fff;
