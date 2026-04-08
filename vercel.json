@@ -4,26 +4,12 @@
     {
       "src": "amazon_rankings.py",
       "use": "@vercel/python"
-    },
-    {
-      "src": "api/tally_webhook.py",
-      "use": "@vercel/python"
     }
   ],
   "routes": [
     {
-      "src": "/webhook/tally",
-      "dest": "api/tally_webhook.py"
-    },
-    {
       "src": "/(.*)",
       "dest": "amazon_rankings.py"
-    }
-  ],
-  "crons": [
-    {
-      "path": "/api/cron/refresh",
-      "schedule": "0 0 * * *"
     }
   ]
 }
