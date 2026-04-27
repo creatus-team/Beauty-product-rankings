@@ -2033,7 +2033,16 @@ async function loadViralData(date) {
   try {
     const res = await fetch('/api/viral_us/data/' + date);
     const data = await res.json();
-    viralAllVideos = (data || []).sort((a,b) => (b.stats?.views||0) - (a.stats?.views||0)).slice(0, 100);
+    // 7일 이내 영상만 (API/스크래퍼 안전망)
+    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    viralAllVideos = (data || [])
+      .filter(v => {
+        if (!v.created_at) return false;
+        const t = new Date(v.created_at).getTime();
+        return !isNaN(t) && t >= cutoff;
+      })
+      .sort((a,b) => (b.stats?.views||0) - (a.stats?.views||0))
+      .slice(0, 100);
     renderViralGrid();
   } catch (e) {
     console.error('viral load error', e);

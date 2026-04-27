@@ -120,8 +120,19 @@ def fetch_dataset(dataset_id: str) -> list[dict]:
 # ── Data processing (영어/미국만 필터) ────────────────────────────────────
 
 def normalize_video(item: dict, source_tag: str, region_filter: bool = True) -> dict | None:
-    """영어 영상만, USA/UK 지역만 (region_filter=True일 때) 통과."""
+    """영어 영상만, USA/UK 지역만 (region_filter=True일 때) 통과, 7일 이내 영상만."""
     try:
+        # 0. 날짜 필터: Apify가 oldestPostDate 무시하는 경우가 있어 코드에서 강제
+        created = item.get("createTimeISO", "") or ""
+        if not created:
+            return None
+        try:
+            dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+            if (datetime.now(timezone.utc) - dt).days > LOOKBACK_DAYS:
+                return None
+        except Exception:
+            return None
+
         author = item.get("authorMeta", {}) or {}
         music  = item.get("musicMeta", {}) or {}
         stats  = {
