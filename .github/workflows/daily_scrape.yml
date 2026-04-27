@@ -39,16 +39,25 @@ jobs:
             python3 -c 'import sys,json; d=json.load(sys.stdin); open("amazon_cache.json","w",encoding="utf-8").write(json.dumps(d,ensure_ascii=False,indent=2)); print("amazon_cache.json saved:",d.get("updated_at"))'
 
       - name: Commit all daily data
+        shell: bash
         run: |
+          set +e  # 부분 실패가 스텝 전체를 죽이지 않도록
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add viral_us_data_*.json viral_us_beauty_*.md amazon_cache.json rankings_*.json
-          git diff --staged --quiet && echo "no changes" && exit 0
+          # 글롭 매칭 안 돼도 OK (--ignore-unmatch)
+          git add viral_us_data_*.json viral_us_beauty_*.md amazon_cache.json rankings_*.json 2>/dev/null
+          if git diff --staged --quiet; then
+            echo "✅ no changes to commit"
+            exit 0
+          fi
           git commit -m "auto: daily data update $(date +'%Y-%m-%d')"
           # 푸시 충돌 시 자동 rebase 후 재시도 (최대 3회)
           for i in 1 2 3; do
-            git pull --rebase origin main && git push && exit 0 || sleep 5
+            git pull --rebase origin main && git push && echo "✅ pushed (attempt $i)" && exit 0
+            echo "⚠️ push attempt $i failed, retrying..."
+            sleep 5
           done
+          echo "❌ all push attempts failed"
           exit 1
 
       - name: Deploy to Vercel
