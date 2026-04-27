@@ -48,8 +48,13 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add viral_us_data_*.json viral_us_beauty_*.md amazon_cache.json rankings_*.json
-          git diff --staged --quiet || git commit -m "auto: daily data update $(date +'%Y-%m-%d')"
-          git push
+          git diff --staged --quiet && echo "no changes" && exit 0
+          git commit -m "auto: daily data update $(date +'%Y-%m-%d')"
+          # 푸시 충돌 시 자동 rebase 후 재시도 (최대 3회)
+          for i in 1 2 3; do
+            git pull --rebase origin main && git push && exit 0 || sleep 5
+          done
+          exit 1
 
       - name: Deploy to Vercel
         env:
