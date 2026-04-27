@@ -1,10 +1,7 @@
 name: Daily Scrape
 
 on:
-  schedule:
-    - cron: "0 0 * * *"       # 매일 오전 9시 KST — Product 새로고침
-    - cron: "0 0 * * 1,3,5"   # 월/수/금 오전 9시 KST — TikTok Viral 수집
-  workflow_dispatch:            # 수동 실행 버튼
+  workflow_dispatch:            # 수동 실행 전용 (자동 스케줄 OFF — 비용 통제)
 
 jobs:
   scrape:
@@ -25,9 +22,7 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
-      # TikTok Viral 수집 — 월/수/금만 실행 (비용 절감, $100/월 한도 내)
-      - name: Run TikTok Viral US scraper (월/수/금)
-        if: github.event.schedule == '0 0 * * 1,3,5' || github.event_name == 'workflow_dispatch'
+      - name: Run TikTok Viral US scraper
         env:
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
         run: python viral_us_daily.py

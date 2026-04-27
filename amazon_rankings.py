@@ -1010,6 +1010,11 @@ select.fs:focus{border-color:var(--pink);background:#fff}
         <option>로딩중...</option>
       </select>
       <span id="viral-count-label" style="font-size:0.86rem;opacity:0.9">—</span>
+      <button id="viral-scrape-btn" onclick="viralRunScrape()" style="background:white;color:#dc2626;
+              border:none;padding:8px 16px;border-radius:8px;font-size:0.86rem;font-weight:800;
+              cursor:pointer;display:flex;align-items:center;gap:5px;white-space:nowrap">
+        🔄 새 스크랩
+      </button>
     </div>
   </div>
 
@@ -1017,8 +1022,8 @@ select.fs:focus{border-color:var(--pink);background:#fff}
     <div id="viral-empty" style="text-align:center;padding:60px 20px;color:#888">
       <div style="font-size:3rem;margin-bottom:14px">📭</div>
       <h3 style="font-size:1.1rem;color:#444;margin-bottom:8px">아직 수집된 데이터가 없어</h3>
-      <p style="font-size:0.92rem">월/수/금 오전 9시 KST에 자동으로 수집돼.</p>
-      <p style="font-size:0.86rem;color:#aaa;margin-top:12px">바로 돌리고 싶으면 GitHub Actions에서 <b>Run workflow</b> 클릭.</p>
+      <p style="font-size:0.92rem">우상단 <b>🔄 새 스크랩</b> 버튼을 누르면 데이터를 가져옵니다.</p>
+      <p style="font-size:0.86rem;color:#aaa;margin-top:12px">⚠️ 1회당 Apify 약 $4 발생 · 5~7분 소요</p>
     </div>
     <div id="viral-grid" style="display:none;
          grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:18px"></div>
@@ -1966,6 +1971,35 @@ function viralDaysAgo(iso) {
 
 function viralEsc(s) {
   return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function viralRunScrape() {
+  const btn = document.getElementById('viral-scrape-btn');
+  if (!confirm('새 스크랩을 시작할까요?\n\n· Apify 약 $4 비용 발생\n· 5~7분 소요\n· 끝나면 페이지 자동 새로고침'))
+    return;
+  btn.disabled = true;
+  btn.style.opacity = '0.6';
+  btn.innerHTML = '⏳ 트리거 중...';
+  try {
+    const res = await fetch('/api/run', {method: 'POST'});
+    const data = await res.json();
+    if (data.ok) {
+      btn.innerHTML = '✅ 스크래핑 중 (5~7분)';
+      alert('GitHub Actions 시작!\n5~7분 후 자동으로 페이지 새로고침됨.\nActions 페이지에서 진행 상황 확인 가능.');
+      // 6분 후 자동 새로고침
+      setTimeout(() => location.reload(), 6 * 60 * 1000);
+    } else {
+      alert('실패: ' + (data.error || 'Unknown'));
+      btn.disabled = false;
+      btn.style.opacity = '1';
+      btn.innerHTML = '🔄 새 스크랩';
+    }
+  } catch (e) {
+    alert('네트워크 오류: ' + e.message);
+    btn.disabled = false;
+    btn.style.opacity = '1';
+    btn.innerHTML = '🔄 새 스크랩';
+  }
 }
 
 async function initViralHub() {
