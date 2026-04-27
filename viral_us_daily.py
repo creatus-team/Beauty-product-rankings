@@ -122,7 +122,11 @@ def fetch_dataset(dataset_id: str) -> list[dict]:
 def normalize_video(item: dict, source_tag: str, region_filter: bool = True) -> dict | None:
     """영어 영상만, USA/UK 지역만 (region_filter=True일 때) 통과, 7일 이내 영상만."""
     try:
-        # 0. 날짜 필터: Apify가 oldestPostDate 무시하는 경우가 있어 코드에서 강제
+        # 0a. 광고/스폰서 영상 제외 — organic만
+        if item.get("isAd") or item.get("isSponsored"):
+            return None
+
+        # 0b. 날짜 필터: Apify가 oldestPostDate 무시하는 경우가 있어 코드에서 강제
         created = item.get("createTimeISO", "") or ""
         if not created:
             return None

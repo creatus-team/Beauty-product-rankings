@@ -1980,6 +1980,21 @@ function viralEsc(s) {
   return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
+function viralPlay(el) {
+  const vid = el.dataset.vid;
+  if (!vid || el.querySelector('iframe')) return;
+  const iframe = document.createElement('iframe');
+  iframe.src = `https://www.tiktok.com/embed/v2/${vid}?autoplay=1&muted=1`;
+  iframe.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:0;background:#000';
+  iframe.allow = 'autoplay';
+  el.appendChild(iframe);
+}
+
+function viralStop(el) {
+  const iframe = el.querySelector('iframe');
+  if (iframe) iframe.remove();
+}
+
 async function viralRunScrape() {
   const btn = document.getElementById('viral-scrape-btn');
   if (!confirm('새 스크랩을 시작할까요?\n\n· Apify 약 $4 비용 발생\n· 5~7분 소요\n· 끝나면 페이지 자동 새로고침'))
@@ -2070,7 +2085,12 @@ function renderViralGrid() {
     const cap = (v.caption || '').split('\n')[0].slice(0, 100);
     const tags = (v.hashtags || []).slice(0, 5).map(t => `<span style="background:#eef2ff;color:#3730a3;padding:2px 7px;border-radius:5px;font-size:0.74rem;font-weight:600">#${viralEsc(t)}</span>`).join(' ');
     const sound = m.title ? `${viralEsc(m.title)} — ${viralEsc(m.artist || '')}` : '(original sound)';
-    const cover = v.cover ? `<img src="${viralEsc(v.cover)}" loading="lazy" style="width:100%;aspect-ratio:9/16;object-fit:cover;background:#f3f4f6" onerror="this.style.display='none'">` : `<div style="width:100%;aspect-ratio:9/16;background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-size:2.5rem;color:#bbb">📹</div>`;
+    const coverImg = v.cover ? `<img src="${viralEsc(v.cover)}" loading="lazy" style="width:100%;aspect-ratio:9/16;object-fit:cover;background:#f3f4f6" onerror="this.style.display='none'">` : `<div style="width:100%;aspect-ratio:9/16;background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-size:2.5rem;color:#bbb">📹</div>`;
+    const cover = `<div class="viral-thumb" data-vid="${viralEsc(v.id)}"
+         onmouseenter="viralPlay(this)" onmouseleave="viralStop(this)"
+         style="position:relative;width:100%;aspect-ratio:9/16;overflow:hidden;background:#000">
+      ${coverImg}
+    </div>`;
 
     return `
       <div style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,0.06);display:flex;flex-direction:column">
