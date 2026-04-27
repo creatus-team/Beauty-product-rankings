@@ -1984,9 +1984,11 @@ function viralPlay(el) {
   const vid = el.dataset.vid;
   if (!vid || el.querySelector('iframe')) return;
   const iframe = document.createElement('iframe');
-  iframe.src = `https://www.tiktok.com/embed/v2/${vid}?autoplay=1&muted=1`;
+  // player/v1 = UI 최소화된 임베드, autoplay/loop/muted/controls 파라미터 지원
+  iframe.src = `https://www.tiktok.com/player/v1/${vid}?autoplay=1&loop=1&music_info=0&description=0&closed_caption=0&rel=0`;
   iframe.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:0;background:#000';
-  iframe.allow = 'autoplay';
+  iframe.allow = 'autoplay; encrypted-media';
+  iframe.setAttribute('allowfullscreen', '');
   el.appendChild(iframe);
 }
 
