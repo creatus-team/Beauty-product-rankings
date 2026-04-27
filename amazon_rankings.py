@@ -841,7 +841,10 @@ select.fs:focus{border-color:var(--pink);background:#fff}
 .dash-mini-item:last-child{border-bottom:none}
 .dash-mini-thumb{width:100%;padding-top:78%;position:relative;background:#ede9e7;overflow:hidden;border-bottom:1px solid #e0d9d6}
 .dash-mini-thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;padding:8px}
-.dash-mini-ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:2rem;color:var(--pink-mid)}
+.dash-mini-ph{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  background:linear-gradient(135deg,#fee2e2 0%,#fef3c7 100%);color:#b91c1c;gap:4px;padding:8px}
+.dash-mini-ph .ph-icon{font-size:1.6rem}
+.dash-mini-ph .ph-label{font-size:0.7rem;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;opacity:0.7}
 .dash-mini-rank{position:absolute;top:7px;left:7px;font-size:.86rem;font-weight:900;color:#fff;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.25);z-index:2}
 .dash-mini-name{padding:8px 10px 4px;font-size:.88rem;font-weight:700;line-height:1.4;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;color:var(--text)}
 .dash-mini-price{padding:0 10px 8px;font-size:.86rem;font-weight:800;color:var(--pink)}
@@ -1263,8 +1266,11 @@ function renderDashboard() {
     top5.forEach((item,idx) => {
       const r=idx+1, rc=r===1?'r1':r===2?'r2':r===3?'r3':'rn';
       const th=item.thumbnailUrl;
+      const isTT = item._country_code === 'TT';
+      const phIcon = isTT ? '🎵' : '🧴';
+      const phLabel = isTT ? 'TikTok Shop' : '';
       const imgEl=th?`<img src="${th}" alt="" loading="eager" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`:'' ;
-      const phEl=`<div class="dash-mini-ph" style="${th?'display:none':''}">🧴</div>`;
+      const phEl=`<div class="dash-mini-ph" style="${th?'display:none':''}"><span class="ph-icon">${phIcon}</span>${phLabel?`<span class="ph-label">${phLabel}</span>`:''}</div>`;
       const rawPrice = item._price_value;
       const cur = item._price_currency || '';
       let priceDisplay = '';
@@ -1350,8 +1356,9 @@ function render() {
       const usd = toUSD(item._price_value, item._price_currency);
       const priceStr = price ? (usd ? `${price} <span style="color:#aaa;font-weight:500">(${usd})</span>` : price) : null;
       const th=item.thumbnailUrl;
+      const isTT2 = item._country_code === 'TT';
       const imgH=th?`<img src="${th}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`:'';
-      const ph=`<div class="ph" style="${th?'display:none':''}">🧴</div>`;
+      const ph=`<div class="ph" style="${th?'display:none':''}${isTT2?';background:linear-gradient(135deg,#fee2e2,#fef3c7);color:#b91c1c':''}">${isTT2?'🎵 TikTok':'🧴'}</div>`;
       html+=`<div class="card">
         <div class="rank-b ${rc}">${r}</div>
         <a href="${item.url||'#'}" target="_blank" rel="noopener">
