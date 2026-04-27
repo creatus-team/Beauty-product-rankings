@@ -803,6 +803,32 @@ def api_x_data_date(date):
     tweets = fetch_twitter_from_apify()
     return jsonify(tweets)
 
+# ── Viral US Beauty (viral_us_daily.py 산출물) ───────────────────────────
+@app.route("/api/viral_us/dates")
+def api_viral_us_dates():
+    files = sorted(glob.glob(os.path.join(_SCRIPT_DIR, "viral_us_data_*.json")), reverse=True)
+    dates = [os.path.basename(f).replace("viral_us_data_","").replace(".json","") for f in files]
+    return jsonify(dates)
+
+@app.route("/api/viral_us/data/<date>")
+def api_viral_us_data(date):
+    path = os.path.join(_SCRIPT_DIR, f"viral_us_data_{date}.json")
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            return jsonify(json.load(f))
+    return jsonify([])
+
+@app.route("/api/viral_us/latest")
+def api_viral_us_latest():
+    """최신 viral US 데이터 자동 반환."""
+    files = sorted(glob.glob(os.path.join(_SCRIPT_DIR, "viral_us_data_*.json")), reverse=True)
+    if not files:
+        return jsonify({"date": None, "videos": []})
+    latest = files[0]
+    date_str = os.path.basename(latest).replace("viral_us_data_","").replace(".json","")
+    with open(latest, encoding="utf-8") as f:
+        return jsonify({"date": date_str, "videos": json.load(f)})
+
 @app.route("/api/cron/refresh", methods=["GET","POST"])
 def api_cron_refresh():
     """Vercel Cron이 매일 9시에 호출 — 상품 데이터 갱신"""
@@ -1823,6 +1849,7 @@ select.fs:focus{border-color:var(--pink);background:#fff}
       <button class="mode-btn active" id="mode-product" onclick="switchMode('product')">📦 Product</button>
       <button class="mode-btn" id="mode-video" onclick="switchMode('video')">🎬 Video</button>
       <button class="mode-btn" id="mode-trend" onclick="switchMode('trend')">📈 트렌드</button>
+      <button class="mode-btn" id="mode-viral" onclick="switchMode('viral')">🇺🇸 US 바이럴</button>
     </div>
     <span class="upd" id="updLbl">—</span>
     <button id="refreshBtn" onclick="refreshData()">↻ 새로고침</button>
@@ -2230,6 +2257,35 @@ select.fs:focus{border-color:var(--pink);background:#fff}
       <div class="icon">🏷️</div>
       <p>TikTok 데이터가 없어. data_*.json 파일을 확인해.</p>
     </div>
+  </div>
+</div>
+
+<!-- ── US Viral Hub ─────────────────────────────────────────── -->
+<div id="viral-hub" style="display:none">
+  <div style="background:linear-gradient(135deg,#1e3a8a 0%,#dc2626 100%);color:#fff;padding:14px 28px;
+       display:flex;justify-content:space-between;align-items:center">
+    <div>
+      <h2 style="font-size:1.15rem;font-weight:800;margin:0">🇺🇸 미국 틱톡 뷰티 — 7일 내 TOP 영상</h2>
+      <div style="font-size:0.85rem;opacity:0.9;margin-top:3px">10만뷰 이상만 · 따라찍기용 카탈로그</div>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center">
+      <select id="viral-date-select" style="padding:7px 12px;border-radius:8px;border:none;
+              font-size:0.86rem;font-weight:700;cursor:pointer">
+        <option>로딩중...</option>
+      </select>
+      <span id="viral-count-label" style="font-size:0.86rem;opacity:0.9">—</span>
+    </div>
+  </div>
+
+  <div id="viral-content" style="padding:24px 28px">
+    <div id="viral-empty" style="text-align:center;padding:60px 20px;color:#888">
+      <div style="font-size:3rem;margin-bottom:14px">📭</div>
+      <h3 style="font-size:1.1rem;color:#444;margin-bottom:8px">아직 수집된 데이터가 없어</h3>
+      <p style="font-size:0.92rem">터미널에서 <code style="background:#f3f4f6;padding:2px 8px;border-radius:5px">python3 viral_us_daily.py</code> 실행하면 오늘자 데이터가 생성돼.</p>
+      <p style="font-size:0.86rem;color:#aaa;margin-top:12px">⚠️ Apify 비용 약 $3-4 발생 (8 해시태그 + 6 키워드 = 14 runs)</p>
+    </div>
+    <div id="viral-grid" style="display:none;
+         grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:18px"></div>
   </div>
 </div>
 
@@ -3120,6 +3176,8 @@ loadData();
 // ══════════════════════════════════════════════════════════════════════════
 let currentMode = 'product';
 let videoHubInitialized = false;
+let viralHubInitialized = false;
+let viralAllVideos = [];
 
 function switchMode(mode) {
   sessionStorage.setItem('kbMode', mode);
@@ -3127,9 +3185,11 @@ function switchMode(mode) {
   document.getElementById('product-hub').style.display = mode === 'product' ? '' : 'none';
   document.getElementById('video-hub').style.display   = mode === 'video'   ? '' : 'none';
   document.getElementById('trend-hub').style.display   = mode === 'trend'   ? 'block' : 'none';
+  document.getElementById('viral-hub').style.display   = mode === 'viral'   ? 'block' : 'none';
   document.getElementById('mode-product').classList.toggle('active', mode === 'product');
   document.getElementById('mode-video').classList.toggle('active', mode === 'video');
   document.getElementById('mode-trend').classList.toggle('active', mode === 'trend');
+  document.getElementById('mode-viral').classList.toggle('active', mode === 'viral');
   const title = document.getElementById('mainTitle');
   const sub   = document.getElementById('mainSub');
   const logo  = document.getElementById('mainLogo');
@@ -3147,14 +3207,126 @@ function switchMode(mode) {
     refreshBtn.style.display = 'none';
     document.getElementById('updLbl').style.display = 'none';
     if (!videoHubInitialized) { initVideoHub(); videoHubInitialized = true; }
-  } else {
+  } else if (mode === 'trend') {
     title.textContent = 'K-Beauty 트렌드 인사이트';
     sub.textContent = '소셜 버즈 × 공백 시장 분석';
     logo.textContent = '📈';
     refreshBtn.style.display = 'none';
     document.getElementById('updLbl').style.display = 'none';
     if (!trInitialized) { trInit(); trInitialized = true; }
+  } else if (mode === 'viral') {
+    title.textContent = '🇺🇸 US 바이럴 카탈로그';
+    sub.textContent = '7일 내 미국 틱톡 뷰티 TOP 영상 (10만뷰+) — 따라찍기용';
+    logo.textContent = '🔥';
+    refreshBtn.style.display = 'none';
+    document.getElementById('updLbl').style.display = 'none';
+    if (!viralHubInitialized) { initViralHub(); viralHubInitialized = true; }
   }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// VIRAL US HUB
+// ══════════════════════════════════════════════════════════════════════════
+
+function viralFmt(n) {
+  n = parseInt(n) || 0;
+  if (n >= 1e6) return (n/1e6).toFixed(1) + 'M';
+  if (n >= 1e3) return (n/1e3).toFixed(1) + 'K';
+  return String(n);
+}
+
+function viralDaysAgo(iso) {
+  if (!iso) return '?';
+  const dt = new Date(iso);
+  if (isNaN(dt)) return '?';
+  const diff = (Date.now() - dt.getTime()) / 1000;
+  if (diff < 3600) return Math.max(1, Math.floor(diff/60)) + '분 전';
+  if (diff < 86400) return Math.floor(diff/3600) + '시간 전';
+  return Math.floor(diff/86400) + '일 전';
+}
+
+function viralEsc(s) {
+  return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function initViralHub() {
+  try {
+    const dRes = await fetch('/api/viral_us/dates');
+    const dates = await dRes.json();
+    const sel = document.getElementById('viral-date-select');
+    if (!dates || dates.length === 0) {
+      sel.innerHTML = '<option>데이터 없음</option>';
+      document.getElementById('viral-empty').style.display = '';
+      document.getElementById('viral-grid').style.display = 'none';
+      document.getElementById('viral-count-label').textContent = '0건';
+      return;
+    }
+    sel.innerHTML = dates.map(d => `<option value="${d}">${d}</option>`).join('');
+    sel.onchange = () => loadViralData(sel.value);
+    await loadViralData(dates[0]);
+  } catch (e) {
+    console.error('viral init error', e);
+  }
+}
+
+async function loadViralData(date) {
+  try {
+    const res = await fetch('/api/viral_us/data/' + date);
+    const data = await res.json();
+    viralAllVideos = (data || []).sort((a,b) => (b.stats?.views||0) - (a.stats?.views||0)).slice(0, 100);
+    renderViralGrid();
+  } catch (e) {
+    console.error('viral load error', e);
+  }
+}
+
+function renderViralGrid() {
+  const grid = document.getElementById('viral-grid');
+  const empty = document.getElementById('viral-empty');
+  const lbl = document.getElementById('viral-count-label');
+  if (!viralAllVideos.length) {
+    grid.style.display = 'none';
+    empty.style.display = '';
+    lbl.textContent = '0건';
+    return;
+  }
+  empty.style.display = 'none';
+  grid.style.display = 'grid';
+  lbl.textContent = `TOP ${viralAllVideos.length}건`;
+
+  grid.innerHTML = viralAllVideos.map((v, i) => {
+    const s = v.stats || {};
+    const c = v.creator || {};
+    const m = v.music || {};
+    const cap = (v.caption || '').split('\n')[0].slice(0, 100);
+    const tags = (v.hashtags || []).slice(0, 5).map(t => `<span style="background:#eef2ff;color:#3730a3;padding:2px 7px;border-radius:5px;font-size:0.74rem;font-weight:600">#${viralEsc(t)}</span>`).join(' ');
+    const sound = m.title ? `${viralEsc(m.title)} — ${viralEsc(m.artist || '')}` : '(original sound)';
+    const cover = v.cover ? `<img src="${viralEsc(v.cover)}" loading="lazy" style="width:100%;aspect-ratio:9/16;object-fit:cover;background:#f3f4f6" onerror="this.style.display='none'">` : `<div style="width:100%;aspect-ratio:9/16;background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-size:2.5rem;color:#bbb">📹</div>`;
+
+    return `
+      <div style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,0.06);display:flex;flex-direction:column">
+        <a href="${viralEsc(v.url)}" target="_blank" style="position:relative;display:block">
+          ${cover}
+          <div style="position:absolute;top:8px;left:8px;background:rgba(220,38,38,0.95);color:#fff;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:0.82rem;font-weight:900">${i+1}</div>
+          <div style="position:absolute;bottom:8px;left:8px;background:rgba(0,0,0,0.7);color:#fff;font-size:0.78rem;font-weight:700;padding:3px 8px;border-radius:5px">👁 ${viralFmt(s.views)}</div>
+        </a>
+        <div style="padding:12px 14px;display:flex;flex-direction:column;gap:6px;flex:1">
+          <div style="display:flex;justify-content:space-between;font-size:0.82rem">
+            <a href="${viralEsc(c.url)}" target="_blank" style="color:#1e3a8a;font-weight:700;text-decoration:none">@${viralEsc(c.username)}</a>
+            <span style="color:#888">${viralDaysAgo(v.created_at)}</span>
+          </div>
+          <div style="font-size:0.8rem;color:#444;display:flex;gap:10px">
+            <span>❤️ ${viralFmt(s.likes)}</span>
+            <span>💬 ${viralFmt(s.comments)}</span>
+            <span>🔖 ${viralFmt(s.saves)}</span>
+          </div>
+          ${cap ? `<div style="font-size:0.84rem;color:#333;line-height:1.45">${viralEsc(cap)}</div>` : ''}
+          <div style="font-size:0.78rem;color:#666;display:flex;gap:5px;align-items:center">🎵 <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${sound}</span></div>
+          ${tags ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:auto">${tags}</div>` : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
 }
 
 // ══════════════════════════════════════════════════════════════════════════
