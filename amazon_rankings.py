@@ -1847,39 +1847,12 @@ select.fs:focus{border-color:var(--pink);background:#fff}
   <div class="h-right">
     <div class="mode-switch">
       <button class="mode-btn active" id="mode-product" onclick="switchMode('product')">📦 Product</button>
-      <button class="mode-btn" id="mode-video" onclick="switchMode('video')">🎬 Video</button>
-      <button class="mode-btn" id="mode-trend" onclick="switchMode('trend')">📈 트렌드</button>
-      <button class="mode-btn" id="mode-viral" onclick="switchMode('viral')">🇺🇸 US 바이럴</button>
+      <button class="mode-btn" id="mode-viral" onclick="switchMode('viral')">🎬 TikTok Viral</button>
     </div>
     <span class="upd" id="updLbl">—</span>
     <button id="refreshBtn" onclick="refreshData()">↻ 새로고침</button>
-    <button onclick="rcOpen()" style="padding:6px 14px;background:#f1f5f9;border:1.5px solid #e2e8f0;
-      border-radius:9px;font-size:0.85rem;font-weight:700;cursor:pointer;color:#374151">
-      📊 순위 변동
-    </button>
   </div>
 </header>
-
-<!-- 순위 변동 패널 -->
-<div id="rank-change-panel" onclick="if(event.target===this)rcClose()">
-  <div id="rank-change-inner">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">
-      <div>
-        <div style="font-weight:800;font-size:1.1rem;color:#1e293b">📊 순위 변동 추적</div>
-        <div id="rc-compare-label" style="font-size:0.82rem;color:#94a3b8;margin-top:2px"></div>
-      </div>
-      <button onclick="rcClose()" style="border:none;background:none;font-size:1.4rem;cursor:pointer;color:#94a3b8">✕</button>
-    </div>
-    <div class="rc-period-btns">
-      <button class="rc-period-btn active" data-p="1d" onclick="rcSetPeriod('1d',this)">1일</button>
-      <button class="rc-period-btn" data-p="1w" onclick="rcSetPeriod('1w',this)">1주일</button>
-      <button class="rc-period-btn" data-p="30d" onclick="rcSetPeriod('30d',this)">30일</button>
-      <button class="rc-period-btn" data-p="90d" onclick="rcSetPeriod('90d',this)">90일</button>
-    </div>
-    <div class="rc-country-filter" id="rc-country-filter"></div>
-    <div id="rc-body" style="min-height:200px"></div>
-  </div>
-</div>
 
 <div id="product-hub">
 <div class="ctabs" id="tabs"></div>
@@ -1931,335 +1904,6 @@ select.fs:focus{border-color:var(--pink);background:#fff}
 <div class="gw" id="gw"></div>
 </div><!-- /product-hub -->
 
-<!-- ══════════════════════════════════════════════════════════════════════ -->
-<!-- VIDEO HUB (hidden until switched) -->
-<!-- ══════════════════════════════════════════════════════════════════════ -->
-<div id="video-hub" style="display:none">
-
-<div class="vh-subheader tiktok" id="vh-subheader">
-  <div>
-    <h2 id="vh-hub-title">K-Beauty TikTok Hub</h2>
-    <div class="sub" id="vh-last-updated">Loading data...</div>
-  </div>
-  <div class="header-right">
-    <div class="platform-switch">
-      <button class="plat-btn tiktok-btn active" id="btn-tiktok" onclick="vSwitchPlatform('tiktok')">🎵 TikTok</button>
-      <button class="plat-btn twitter-btn" id="btn-twitter" onclick="vSwitchPlatform('twitter')">🇯🇵 JP Twitter</button>
-    </div>
-    <div id="apify-credit-badge" style="font-size:0.82rem;color:rgba(255,255,255,0.75);cursor:pointer;text-align:right;line-height:1.4" onclick="vLoadApifyUsage()" title="클릭하여 갱신">
-      <div style="font-weight:700" id="apify-used">💳 로딩중...</div>
-      <div id="apify-bar" style="width:80px;height:4px;background:rgba(255,255,255,0.2);border-radius:2px;margin-top:2px">
-        <div id="apify-bar-fill" style="height:100%;border-radius:2px;background:#4ade80;width:0%;transition:width 0.5s"></div>
-      </div>
-    </div>
-    <button class="run-btn" id="v-run-btn" onclick="vTriggerScrape()">Run New Scrape</button>
-  </div>
-</div>
-
-<div class="v-layout" id="v-tiktok-layout">
-  <!-- SIDEBAR FILTERS -->
-  <aside class="v-sidebar">
-    <div class="filter-section">
-      <span class="filter-label">Date Range</span>
-      <div class="date-btns">
-        <button class="date-btn active" onclick="vSetDateRange('all', this)">All Time</button>
-        <button class="date-btn" onclick="vSetDateRange(1, this)">Today</button>
-        <button class="date-btn" onclick="vSetDateRange(7, this)">7 Days</button>
-        <button class="date-btn" onclick="vSetDateRange(30, this)">30 Days</button>
-        <button class="date-btn" onclick="vSetDateRange(90, this)">90 Days</button>
-      </div>
-    </div>
-    <hr class="divider">
-    <div class="filter-section">
-      <span class="filter-label">Search</span>
-      <div class="filter-group">
-        <input type="text" id="vf-creator" placeholder="Creator username...">
-        <input type="text" id="vf-hashtag" placeholder="Hashtag (e.g. glasskin)...">
-        <input type="text" id="vf-keyword" placeholder="Caption keyword...">
-      </div>
-    </div>
-    <hr class="divider">
-    <div class="filter-section">
-      <span class="filter-label">Min Views</span>
-      <div class="range-row">
-        <input type="number" id="vf-views-min" placeholder="e.g. 100000" min="0" value="100000">
-        <span>+</span>
-      </div>
-    </div>
-    <div class="filter-section">
-      <span class="filter-label">Min Followers</span>
-      <input type="number" id="vf-followers-min" placeholder="e.g. 10000" min="0" value="500">
-    </div>
-    <hr class="divider">
-    <div class="filter-section">
-      <span class="filter-label">Region / Country</span>
-      <select id="vf-region">
-        <option value="all">🌍 All Regions</option>
-        <option value="🇺🇸 USA / UK">🇺🇸 USA / UK</option>
-        <option value="🇰🇷 Korea">🇰🇷 Korea</option>
-        <option value="🇨🇳 China">🇨🇳 China</option>
-        <option value="🇹🇼 Taiwan">🇹🇼 Taiwan</option>
-        <option value="🇯🇵 Japan">🇯🇵 Japan</option>
-        <option value="🇮🇩 Indonesia">🇮🇩 Indonesia</option>
-        <option value="🇸🇬 Singapore">🇸🇬 Singapore</option>
-        <option value="🇹🇭 Thailand">🇹🇭 Thailand</option>
-        <option value="🇻🇳 Vietnam">🇻🇳 Vietnam</option>
-        <option value="🇵🇭 Philippines">🇵🇭 Philippines</option>
-        <option value="🇧🇷 Brazil">🇧🇷 Brazil</option>
-        <option value="🇪🇸 Spain / Mexico">🇪🇸 Spain / Mexico</option>
-        <option value="🇬🇧 UK">🇬🇧 UK</option>
-        <option value="🇦🇪 UAE">🇦🇪 UAE</option>
-        <option value="🌍 Other">🌍 Other</option>
-      </select>
-    </div>
-    <div class="filter-section">
-      <span class="filter-label">Source Dataset</span>
-      <select id="vf-dataset">
-        <option value="all">All Datasets</option>
-      </select>
-    </div>
-    <div class="filter-section">
-      <span class="filter-label">Source Hashtag</span>
-      <select id="vf-source-tag">
-        <option value="all">All Hashtags</option>
-      </select>
-    </div>
-    <button class="apply-btn" onclick="vApplyFilters()">Apply Filters</button>
-    <button class="clear-btn" onclick="vClearFilters()">Clear All</button>
-  </aside>
-
-  <!-- MAIN CONTENT -->
-  <main class="v-main">
-    <div class="stats-bar" id="v-stats-bar">
-      <div class="stat-chip"><div class="n" id="vs-videos">—</div><div class="l">Videos</div></div>
-      <div class="stat-chip"><div class="n" id="vs-views">—</div><div class="l">Total Views</div></div>
-      <div class="stat-chip"><div class="n" id="vs-likes">—</div><div class="l">Total Likes</div></div>
-      <div class="stat-chip"><div class="n" id="vs-creators">—</div><div class="l">Creators</div></div>
-    </div>
-    <div class="tabs" id="v-tabs">
-      <button class="tab active" onclick="vSwitchTab('videos', this)">Viral Videos</button>
-      <button class="tab strategy-tab" onclick="vSwitchTab('strategy', this)">🎯 Strategy</button>
-      <button class="tab" onclick="vSwitchTab('creators', this)">Creators</button>
-      <button class="tab" onclick="vSwitchTab('hashtags', this)">Hashtags</button>
-      <button class="tab" onclick="vSwitchTab('topchannels', this)">Top Channels</button>
-      <button class="tab" onclick="vSwitchTab('audio', this)">Audio</button>
-    </div>
-    <div class="sort-bar" id="v-sort-bar">
-      <label>Sort by:</label>
-      <select id="v-sort-select" onchange="vRenderVideos()">
-        <option value="views">Views</option>
-        <option value="likes">Likes</option>
-        <option value="comments">Comments</option>
-        <option value="shares">Shares</option>
-        <option value="saves">Saves</option>
-        <option value="engagement">Engagement Score</option>
-        <option value="followers">Creator Followers</option>
-        <option value="date">Date (Newest)</option>
-      </select>
-      <div class="result-count" id="v-result-count"></div>
-    </div>
-    <div id="v-panel-videos"></div>
-    <div id="v-panel-strategy" style="display:none"></div>
-    <div id="v-panel-creators" style="display:none"></div>
-    <div id="v-panel-hashtags" style="display:none"></div>
-    <div id="v-panel-topchannels" style="display:none"></div>
-    <div id="v-panel-audio" style="display:none"></div>
-  </main>
-</div>
-
-<!-- Video hover preview popup -->
-<div class="video-preview-popup" id="vVideoPreview"></div>
-
-<!-- TWITTER HUB (hidden until switched) -->
-<div id="v-twitter-hub" style="display:none">
-  <div class="v-layout">
-    <aside class="v-sidebar" style="border-right-color:#e8f4ff">
-      <div class="filter-section">
-        <span class="filter-label" style="color:#1d9bf0">Date Range</span>
-        <div class="date-btns">
-          <button class="date-btn active" onclick="vSetXDateRange('all', this)">All Time</button>
-          <button class="date-btn" onclick="vSetXDateRange(1, this)">Today</button>
-          <button class="date-btn" onclick="vSetXDateRange(7, this)">7 Days</button>
-          <button class="date-btn" onclick="vSetXDateRange(30, this)">30 Days</button>
-        </div>
-      </div>
-      <hr class="divider">
-      <div class="filter-section">
-        <span class="filter-label" style="color:#1d9bf0">Search</span>
-        <div class="filter-group">
-          <input type="text" id="vxf-author" placeholder="@username...">
-          <input type="text" id="vxf-hashtag" placeholder="Hashtag (e.g. kbeauty)...">
-          <input type="text" id="vxf-keyword" placeholder="Keyword in tweet...">
-        </div>
-      </div>
-      <hr class="divider">
-      <div class="filter-section">
-        <span class="filter-label" style="color:#1d9bf0">Min Views</span>
-        <input type="number" id="vxf-views-min" placeholder="e.g. 10000" min="0">
-      </div>
-      <div class="filter-section">
-        <span class="filter-label" style="color:#1d9bf0">Min Retweets</span>
-        <input type="number" id="vxf-rt-min" placeholder="e.g. 100" min="0">
-      </div>
-      <hr class="divider">
-      <div class="filter-section">
-        <span class="filter-label" style="color:#1d9bf0">Sort By</span>
-        <select id="vx-sort-select" onchange="vRenderTweets()">
-          <option value="views">Views</option>
-          <option value="likes">Likes</option>
-          <option value="retweets">Retweets</option>
-          <option value="replies">Replies</option>
-          <option value="bookmarks">Bookmarks</option>
-          <option value="date">Date (Newest)</option>
-        </select>
-      </div>
-      <button class="apply-btn" style="background:#1d9bf0" onclick="vApplyXFilters()">Apply Filters</button>
-      <button class="clear-btn" onclick="vClearXFilters()">Clear All</button>
-    </aside>
-    <main class="v-main">
-      <div class="stats-bar" id="vx-stats-bar">
-        <div class="stat-chip"><div class="n" id="vxs-tweets" style="color:#1d9bf0">—</div><div class="l">Tweets</div></div>
-        <div class="stat-chip"><div class="n" id="vxs-views" style="color:#1d9bf0">—</div><div class="l">Total Views</div></div>
-        <div class="stat-chip"><div class="n" id="vxs-likes" style="color:#1d9bf0">—</div><div class="l">Total Likes</div></div>
-        <div class="stat-chip"><div class="n" id="vxs-accounts" style="color:#1d9bf0">—</div><div class="l">Accounts</div></div>
-      </div>
-      <div class="tabs" id="vx-tabs">
-        <button class="tab active" style="--ac:#1d9bf0" onclick="vSwitchXTab('tweets', this)">Viral Tweets</button>
-        <button class="tab" onclick="vSwitchXTab('xcreators', this)">Top Accounts</button>
-        <button class="tab" onclick="vSwitchXTab('xhashtags', this)">Trending Tags</button>
-      </div>
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;background:white;padding:10px 16px;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.05)">
-        <span style="font-size:0.8rem;color:#888">Dataset:</span>
-        <select id="vx-date-pick" onchange="vLoadXDate(this.value)" style="width:auto;flex:1;padding:6px 10px;font-size:0.82rem"></select>
-        <div id="vx-result-count" style="margin-left:auto;font-size:0.8rem;color:#aaa"></div>
-      </div>
-      <div id="vx-panel-tweets"></div>
-      <div id="vx-panel-xcreators" style="display:none"></div>
-      <div id="vx-panel-xhashtags" style="display:none"></div>
-    </main>
-  </div>
-</div>
-
-
-<div id="v-toast"></div>
-</div><!-- /video-hub -->
-
-<!-- ── 트렌드 인사이트 허브 ──────────────────────────── -->
-<div id="trend-hub">
-  <div class="tr-header">
-    <div>
-      <div class="tr-title">📈 K-Beauty 트렌드 인사이트</div>
-      <div class="tr-sub">소셜 버즈 × 상품 공백 분석 — 데이터 기반 PB 기회 탐지</div>
-    </div>
-    <div class="tr-tabs">
-      <button class="tr-tab active" id="tr-tab-timeline" onclick="trSwitchTab('timeline',this)">📊 키워드 타임라인</button>
-      <button class="tr-tab" id="tr-tab-gaps" onclick="trSwitchTab('gaps',this)">🔍 공백 시장 탐지</button>
-      <button class="tr-tab" id="tr-tab-creators" onclick="trSwitchTab('creators',this)">🌱 크리에이터 신호</button>
-      <button class="tr-tab" id="tr-tab-brands" onclick="trSwitchTab('brands',this)">🏷️ 브랜드 버즈</button>
-    </div>
-  </div>
-
-  <!-- 타임라인 패널 -->
-  <div id="tr-panel-timeline" class="tr-body">
-    <div style="font-size:0.82rem;color:#666;line-height:1.6;margin-bottom:16px">
-      K-beauty 성분·제형 키워드가 <strong>🌏 아시아 마켓</strong>(OliveYoung·Amazon JP·Qoo10) vs
-      <strong>🌍 서양 마켓</strong>(Amazon US·UK·TikTok Shop·YesStyle)에 상품이 얼마나 있는지 비교해.
-      <span style="color:#ef4444">아시아가 높으면</span> 아직 서양에 기회가 있다는 신호야.
-    </div>
-    <!-- 요약 카드 -->
-    <div class="tl-summary" id="tl-summary"></div>
-    <!-- 카테고리 필터 -->
-    <div class="tl-cat-btns">
-      <button class="tl-cat-btn active" onclick="trSetCat('전체',this)">전체</button>
-      <button class="tl-cat-btn" onclick="trSetCat('성분',this)">💊 핵심 성분</button>
-      <button class="tl-cat-btn" onclick="trSetCat('제형',this)">🧴 제형 타입</button>
-      <button class="tl-cat-btn" onclick="trSetCat('기능성',this)">☀️ 기능성</button>
-    </div>
-    <div class="chart-card">
-      <div class="chart-label">아시아 vs 서양 마켓 상품 수 비교 (많을수록 해당 마켓에서 인기)</div>
-      <canvas id="tl-chart"></canvas>
-    </div>
-    <div id="tl-empty" class="empty-state" style="display:none">
-      <div class="icon">📊</div>
-      <p>상품 데이터가 없어. 새로고침 후 다시 확인해.</p>
-    </div>
-  </div>
-
-  <!-- 공백 탐지 패널 -->
-  <div id="tr-panel-gaps" class="tr-body" style="display:none">
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap">
-      <div style="font-size:0.82rem;color:#666;line-height:1.6;max-width:640px">
-        아시아 마켓(OliveYoung·JP·Qoo10)에서 상품이 많은데 서양 마켓(US·UK·TikTok Shop·YesStyle)에는 적은 성분 = K-beauty PB 진입 기회.<br>
-        <span style="color:#ef4444;font-weight:700">🔴 Hot Gap</span> 아시아 독주, 서양 공백 &nbsp;
-        <span style="color:#d97706;font-weight:700">🟡 Warm Gap</span> 균형점 &nbsp;
-        <span style="color:#2563eb;font-weight:700">🔵 Well-covered</span> 서양 이미 포화
-      </div>
-      <button onclick="trLoadGaps()" style="margin-left:auto;padding:8px 18px;background:#2d3561;color:white;
-        border:none;border-radius:9px;font-weight:700;font-size:0.82rem;cursor:pointer">↻ 새로 분석</button>
-    </div>
-    <div id="tr-gaps-grid" class="gap-grid"></div>
-    <div id="tr-gaps-empty" class="empty-state" style="display:none">
-      <div class="icon">🔍</div>
-      <p>Twitter 데이터가 없어. 먼저 Twitter 수집 후 다시 확인해.</p>
-    </div>
-  </div>
-
-  <!-- 크리에이터 신호 패널 -->
-  <div id="tr-panel-creators" class="tr-body" style="display:none">
-    <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:20px;flex-wrap:wrap">
-      <div style="font-size:0.82rem;color:#666;line-height:1.6;max-width:680px">
-        TikTok K-beauty 크리에이터 중 팔로워 적은데 인게이지먼트 높은 계정 = 아직 주류화 전 초기 신호.<br>
-        <span style="color:#ef4444;font-weight:700">🔴 Breakthrough</span> ER 20%+ &nbsp;
-        <span style="color:#d97706;font-weight:700">🟡 Rising</span> ER 5~20% &nbsp;
-        <span style="color:#2563eb;font-weight:700">🔵 Emerging</span> ER 5% 미만<br>
-        <span style="font-size:0.82rem;color:#aaa">ER = (좋아요 + 댓글×2 + 공유×3 + 저장×2) ÷ 뷰 × 100. TikTok은 알고리즘 배포 특성상 뷰 기준이 더 정확. 팔로워 100~10만 계정만 포함.</span>
-      </div>
-      <button onclick="trLoadCreators()" style="margin-left:auto;padding:8px 18px;background:#2d3561;color:white;
-        border:none;border-radius:9px;font-weight:700;font-size:0.82rem;cursor:pointer">↻ 새로 분석</button>
-    </div>
-    <div id="tr-creators-grid" class="cr-grid"></div>
-    <div id="tr-creators-empty" class="empty-state" style="display:none">
-      <div class="icon">🌱</div>
-      <p>K-beauty 크리에이터 데이터가 없어. 먼저 TikTok 수집 후 다시 확인해.</p>
-    </div>
-  </div>
-
-  <!-- 브랜드 버즈 패널 -->
-  <div id="tr-panel-brands" class="tr-body" style="display:none">
-    <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:16px;flex-wrap:wrap">
-      <div style="font-size:0.82rem;color:#666;line-height:1.6;max-width:680px">
-        지금 터지는 K-beauty 바이럴 영상(캡션·해시태그)에서 언급된 브랜드 순위.
-        총 뷰가 높을수록 바이럴 영상들에 더 많이 노출된 브랜드야.<br>
-        <span style="color:#ef4444;font-weight:700">🔥 급상승</span> 최근 급증 &nbsp;
-        <span style="color:#d97706;font-weight:700">↑ 상승 중</span> 꾸준히 증가 &nbsp;
-        <span style="color:#4f46e5;font-weight:700">→ 안정적</span> 기존 강자
-      </div>
-      <button onclick="trLoadBrands()" style="margin-left:auto;padding:8px 18px;background:#2d3561;color:white;
-        border:none;border-radius:9px;font-weight:700;font-size:0.82rem;cursor:pointer">↻ 새로 분석</button>
-    </div>
-    <!-- 정렬 + 뷰 토글 -->
-    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:16px">
-      <div class="br-sort" style="margin-bottom:0">
-        <button class="br-sort-btn active" onclick="brSetSort('views',this)">👁 총 뷰 순</button>
-        <button class="br-sort-btn" onclick="brSetSort('count',this)">📹 영상 수 순</button>
-        <button class="br-sort-btn" onclick="brSetSort('trend',this)">🔥 트렌드 순</button>
-      </div>
-      <div style="display:flex;gap:6px">
-        <button class="br-view-btn active" id="br-view-card" onclick="brSetView('card',this)">📋 카드</button>
-        <button class="br-view-btn" id="br-view-chart" onclick="brSetView('chart',this)">📊 차트</button>
-      </div>
-    </div>
-    <div id="tr-brands-grid" class="br-grid"></div>
-    <div id="tr-brands-chart" style="display:none;background:white;border-radius:14px;padding:20px;box-shadow:0 1px 6px rgba(0,0,0,0.07)">
-      <canvas id="br-chart-canvas"></canvas>
-    </div>
-    <div id="tr-brands-empty" class="empty-state" style="display:none">
-      <div class="icon">🏷️</div>
-      <p>TikTok 데이터가 없어. data_*.json 파일을 확인해.</p>
-    </div>
-  </div>
-</div>
-
 <!-- ── US Viral Hub ─────────────────────────────────────────── -->
 <div id="viral-hub" style="display:none">
   <div style="background:linear-gradient(135deg,#1e3a8a 0%,#dc2626 100%);color:#fff;padding:14px 28px;
@@ -2281,8 +1925,8 @@ select.fs:focus{border-color:var(--pink);background:#fff}
     <div id="viral-empty" style="text-align:center;padding:60px 20px;color:#888">
       <div style="font-size:3rem;margin-bottom:14px">📭</div>
       <h3 style="font-size:1.1rem;color:#444;margin-bottom:8px">아직 수집된 데이터가 없어</h3>
-      <p style="font-size:0.92rem">터미널에서 <code style="background:#f3f4f6;padding:2px 8px;border-radius:5px">python3 viral_us_daily.py</code> 실행하면 오늘자 데이터가 생성돼.</p>
-      <p style="font-size:0.86rem;color:#aaa;margin-top:12px">⚠️ Apify 비용 약 $3-4 발생 (8 해시태그 + 6 키워드 = 14 runs)</p>
+      <p style="font-size:0.92rem">월/수/금 오전 9시 KST에 자동으로 수집돼.</p>
+      <p style="font-size:0.86rem;color:#aaa;margin-top:12px">바로 돌리고 싶으면 GitHub Actions에서 <b>Run workflow</b> 클릭.</p>
     </div>
     <div id="viral-grid" style="display:none;
          grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:18px"></div>
@@ -3180,15 +2824,12 @@ let viralHubInitialized = false;
 let viralAllVideos = [];
 
 function switchMode(mode) {
+  if (mode !== 'product' && mode !== 'viral') mode = 'product';
   sessionStorage.setItem('kbMode', mode);
   currentMode = mode;
   document.getElementById('product-hub').style.display = mode === 'product' ? '' : 'none';
-  document.getElementById('video-hub').style.display   = mode === 'video'   ? '' : 'none';
-  document.getElementById('trend-hub').style.display   = mode === 'trend'   ? 'block' : 'none';
   document.getElementById('viral-hub').style.display   = mode === 'viral'   ? 'block' : 'none';
   document.getElementById('mode-product').classList.toggle('active', mode === 'product');
-  document.getElementById('mode-video').classList.toggle('active', mode === 'video');
-  document.getElementById('mode-trend').classList.toggle('active', mode === 'trend');
   document.getElementById('mode-viral').classList.toggle('active', mode === 'viral');
   const title = document.getElementById('mainTitle');
   const sub   = document.getElementById('mainSub');
@@ -3200,23 +2841,9 @@ function switchMode(mode) {
     logo.textContent = '🛒';
     refreshBtn.style.display = '';
     document.getElementById('updLbl').style.display = '';
-  } else if (mode === 'video') {
-    title.textContent = 'K-Beauty Research Hub';
-    sub.textContent = 'TikTok & X 바이럴 컨텐츠 분석';
-    logo.textContent = '🔬';
-    refreshBtn.style.display = 'none';
-    document.getElementById('updLbl').style.display = 'none';
-    if (!videoHubInitialized) { initVideoHub(); videoHubInitialized = true; }
-  } else if (mode === 'trend') {
-    title.textContent = 'K-Beauty 트렌드 인사이트';
-    sub.textContent = '소셜 버즈 × 공백 시장 분석';
-    logo.textContent = '📈';
-    refreshBtn.style.display = 'none';
-    document.getElementById('updLbl').style.display = 'none';
-    if (!trInitialized) { trInit(); trInitialized = true; }
-  } else if (mode === 'viral') {
-    title.textContent = '🇺🇸 US 바이럴 카탈로그';
-    sub.textContent = '7일 내 미국 틱톡 뷰티 TOP 영상 (10만뷰+) — 따라찍기용';
+  } else {
+    title.textContent = '🎬 TikTok Viral 카탈로그';
+    sub.textContent = '7일 내 미국 틱톡 뷰티 TOP 영상 — 따라찍기용';
     logo.textContent = '🔥';
     refreshBtn.style.display = 'none';
     document.getElementById('updLbl').style.display = 'none';
