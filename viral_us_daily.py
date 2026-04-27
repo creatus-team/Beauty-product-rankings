@@ -17,8 +17,8 @@ BASE_URL    = "https://api.apify.com/v2"
 
 LOOKBACK_DAYS = 7              # 최근 7일 영상만
 MIN_VIEWS     = 100_000        # 10만 뷰 이상만 (잘된 것만)
-RESULTS_PER_HASHTAG = 100
-RESULTS_PER_KEYWORD = 100
+RESULTS_PER_HASHTAG = 200   # latest 정렬은 신선도 보장하지만 viral 보장 X → 더 많이 받아 sift
+RESULTS_PER_KEYWORD = 200
 TOP_N_VIDEOS  = 100            # 디지스트에 보일 영상 수 (조회수 순)
 
 # ── 해시태그 8개 (K-skincare 4 + US 광역 4) ──────────────────────────────
@@ -65,7 +65,7 @@ def start_run(hashtag: str) -> str:
         "shouldDownloadMusicCovers": False,
         "shouldDownloadSubtitles": "NEVER_DOWNLOAD_SUBTITLES",
         "profileScrapingSection": "videos",
-        "sortingType": "popular",
+        "sortingType": "latest",
     }
     r = requests.post(url, json=payload, timeout=30)
     r.raise_for_status()
@@ -85,7 +85,7 @@ def start_keyword_run(keyword: str) -> str:
         "shouldDownloadAvatars": False,
         "shouldDownloadMusicCovers": False,
         "shouldDownloadSubtitles": "NEVER_DOWNLOAD_SUBTITLES",
-        "sortingType": "popular",
+        "sortingType": "latest",
     }
     r = requests.post(url, json=payload, timeout=30)
     r.raise_for_status()
