@@ -9,6 +9,7 @@ __pycache__/
 !data_*.json
 !twitter_*.json
 !xhs_data_*.json
+!viral_us_data_*.json
 !slack_sent.json
 last_run.log
 last_twitter_run.log
