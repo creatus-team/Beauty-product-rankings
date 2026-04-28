@@ -562,7 +562,9 @@ def list_snapshot_dates():
 def api_refresh():
     items = fetch_from_apify(refresh=True)
     cache = save_cache(items)
-    return jsonify({"ok": True, "count": len(items), "updated_at": cache["updated_at"]})
+    # Vercel serverless /tmp 인스턴스 분리 문제 → 데이터 인라인 반환
+    return jsonify({"ok": True, "count": len(items),
+                    "updated_at": cache["updated_at"], "items": items})
 
 @app.route("/api/data")
 def api_data():
@@ -1059,12 +1061,26 @@ async function refreshData() {
   const btn = document.getElementById('refreshBtn');
   btn.disabled = true;
   btn.innerHTML = '<span class="spin">↻</span> 가져오는 중...';
-  show('Apify에서 최신 랭킹 가져오는 중...');
+  show('Apify에서 최신 랭킹 가져오는 중... (최대 60초)');
   try {
     const res = await fetch('/api/refresh', {method:'POST'});
     const json = await res.json();
-    if (json.ok) { all = []; await loadData(); return; }
-  } catch(e) { console.error(e); }
+    if (json.ok && json.items) {
+      // 인라인 응답을 직접 사용 (Vercel 인스턴스 분리 회피)
+      all = json.items;
+      setUpdated(json.updated_at);
+      buildTabs();
+      render();
+      hide();
+      btn.disabled = false;
+      btn.innerHTML = '↻ 새로고침';
+      return;
+    }
+    alert('새로고침 응답 이상: ' + JSON.stringify(json).slice(0, 200));
+  } catch(e) {
+    console.error(e);
+    alert('새로고침 실패: ' + e.message);
+  }
   hide();
   btn.disabled = false;
   btn.innerHTML = '↻ 새로고침';
