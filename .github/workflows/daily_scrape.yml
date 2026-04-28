@@ -1,7 +1,9 @@
 name: Daily Scrape
 
 on:
-  workflow_dispatch:            # 수동 실행 전용 (자동 스케줄 OFF — 비용 통제)
+  schedule:
+    - cron: "0 0 * * *"   # 매일 9시 KST — 무료 스크래퍼(OY/YS/QJ)만 갱신
+  workflow_dispatch:        # 수동: TikTok Viral 스크래퍼 포함
 
 jobs:
   scrape:
@@ -22,7 +24,9 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
+      # TikTok Viral 스크래퍼 — 수동 실행 시에만 (Apify $5-6 발생)
       - name: Run TikTok Viral US scraper
+        if: github.event_name == 'workflow_dispatch'
         env:
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
         run: python viral_us_daily.py
