@@ -21,37 +21,37 @@ RESULTS_PER_HASHTAG = 200   # latest 정렬은 신선도 보장하지만 viral �
 RESULTS_PER_KEYWORD = 200
 TOP_N_VIDEOS  = 100            # 디지스트에 보일 영상 수 (조회수 순)
 
-# ── 해시태그 11개 (K-focused + 구매의도 + 메가트렌드) ────────────────────
+# ── 해시태그 12개 (K-focused + 구매의도 + 메가트렌드 + 다양화) ──────────
 US_BEAUTY_HASHTAGS = [
     # K-direct
     "koreanskincare",
     "glassskin",
     "porelessskin",
-    "snailmucin",            # ⭐ K-ingredient 1위 (Beauty of Joseon 등)
+    "snailmucin",            # K-ingredient 1위 (Beauty of Joseon 등)
+    "centellaskincare",      # 시카 트렌드 다양화
     # K-trending 2026
     "skinbarrier",
-    "skinbarrierrepair",     # ⭐ 의학적 K-트렌드
-    # 구매 의도 시그널
-    "tiktokmademebuyit",     # ⭐ 따라찍기 직격
-    "skincareholygrail",     # ⭐ 신뢰 시그널 (광고 X 보장)
+    "skinbarrierrepair",     # 의학적 K-트렌드
+    # 구매 의도 / 신뢰
+    "tiktokmademebuyit",     # 따라찍기 직격
+    "skincareholygrail",     # 신뢰 시그널 (광고 X 보장)
+    "skincareobsessed",      # 광적 팬덤 다양화
     # US 메가 트렌드
-    "cleangirl",             # ⭐ K-skincare 미감
+    "cleangirl",             # K-skincare 미감
     "skintok",
-    "skincaretok",
 ]
 
-# ── 키워드 10개 (영어 미국 뷰티 + 구매의도) ──────────────────────────────
+# ── 키워드 9개 (영어 미국 뷰티 + 다양화) ─────────────────────────────────
 US_BEAUTY_KEYWORDS = [
     "viral skincare",
     "must have skincare",
     "skincare must haves 2026",
     "korean skincare routine",
     "pore minimizing",
-    "glass skin routine",
-    "snail mucin essence",     # ⭐ K-제품 직격
-    "rice toner routine",      # ⭐ 한국 라이스 토너 트렌드
-    "tiktok made me buy it",   # ⭐ 구매 의도
-    "skin cycling",            # ⭐ 2025-26 메가 트렌드
+    "rice toner routine",      # 한국 라이스 토너 트렌드
+    "skin cycling",            # 2025-26 메가 트렌드
+    "underrated skincare",     # 숨겨진 보석 발굴
+    "korean glow up",          # Before/After 트렌드
 ]
 
 OUTPUT_DIR = os.path.dirname(os.path.abspath(__file__))
