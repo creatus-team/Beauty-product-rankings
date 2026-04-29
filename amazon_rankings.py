@@ -2082,9 +2082,12 @@ async function loadViralData(date) {
         return !isNaN(t) && t >= cutoff;
       })
       .map(v => {
-        // Underdog ratio = 조회수 / 팔로워 (팔로워 0 인 경우 1로 처리)
-        const followers = Math.max(1, v.creator?.followers || 0);
-        v._underdog = (v.stats?.views || 0) / followers;
+        // Underdog = 조회수 / 팔로워. followers < 1000 은 Apify 데이터 신뢰 X → null
+        const followers = v.creator?.followers || 0;
+        v._followers_reliable = followers >= 1000;
+        v._underdog = v._followers_reliable
+          ? (v.stats?.views || 0) / followers
+          : null;
         return v;
       });
     renderViralGrid();
@@ -2117,12 +2120,26 @@ function renderViralGrid() {
   empty.style.display = 'none';
   grid.style.display = 'grid';
 
-  // 현재 정렬 모드에 따라 정렬
-  const sorted = viralAllVideos.slice().sort((a,b) => viralSortMode === 'underdog'
-    ? (b._underdog||0) - (a._underdog||0)
-    : (b.stats?.views||0) - (a.stats?.views||0)
-  ).slice(0, 100);
-  lbl.textContent = `TOP ${sorted.length}건 (${viralSortMode === 'underdog' ? '🔥 Underdog' : '👁 조회수'})`;
+  // 현재 정렬 모드에 따라 정렬. Underdog 모드면 신뢰 데이터만
+  let sorted;
+  if (viralSortMode === 'underdog') {
+    sorted = viralAllVideos
+      .filter(v => v._followers_reliable && v._underdog != null)
+      .sort((a,b) => (b._underdog||0) - (a._underdog||0))
+      .slice(0, 100);
+    lbl.textContent = `🔥 Underdog ${sorted.length}건 (팔로워≥1K 신뢰 데이터만)`;
+  } else {
+    sorted = viralAllVideos
+      .slice()
+      .sort((a,b) => (b.stats?.views||0) - (a.stats?.views||0))
+      .slice(0, 100);
+    lbl.textContent = `👁 TOP 조회수 ${sorted.length}건`;
+  }
+  if (!sorted.length) {
+    grid.style.display = 'none';
+    empty.style.display = '';
+    return;
+  }
 
   grid.innerHTML = sorted.map((v, i) => {
     const s = v.stats || {};
@@ -2138,11 +2155,11 @@ function renderViralGrid() {
       ${coverImg}
     </div>`;
 
-    // Underdog 배지: 10배 이상이면 빨강 강조, 3배 이상이면 노랑
-    const underdog = v._underdog || 0;
-    const underdogBadge = underdog >= 10
+    // Underdog 배지: 신뢰 데이터(팔로워≥1K)만, 10배+ 빨강, 3배+ 노랑
+    const underdog = v._underdog;
+    const underdogBadge = (v._followers_reliable && underdog >= 10)
       ? `<div style="position:absolute;top:8px;right:8px;background:#dc2626;color:#fff;font-size:0.74rem;font-weight:900;padding:3px 8px;border-radius:5px;box-shadow:0 2px 6px rgba(0,0,0,0.3)">🔥 ${underdog.toFixed(1)}x</div>`
-      : underdog >= 3
+      : (v._followers_reliable && underdog >= 3)
         ? `<div style="position:absolute;top:8px;right:8px;background:#f59e0b;color:#fff;font-size:0.74rem;font-weight:800;padding:3px 8px;border-radius:5px">⚡ ${underdog.toFixed(1)}x</div>`
         : '';
 
@@ -2159,7 +2176,9 @@ function renderViralGrid() {
             <a href="${viralEsc(c.url)}" target="_blank" style="color:#1e3a8a;font-weight:700;text-decoration:none">@${viralEsc(c.username)}</a>
             <span style="color:#888">${viralDaysAgo(v.created_at)}</span>
           </div>
-          <div style="font-size:0.78rem;color:#666">팔로워 ${viralFmt(c.followers||0)} · 영상이 ${underdog.toFixed(1)}배 도달</div>
+          <div style="font-size:0.78rem;color:#666">${v._followers_reliable
+            ? `팔로워 ${viralFmt(c.followers)} · ${underdog.toFixed(1)}배 도달`
+            : `<span style="color:#bbb">팔로워 정보 부정확 (Apify 미반영)</span>`}</div>
           <div style="font-size:0.8rem;color:#444;display:flex;gap:10px">
             <span>❤️ ${viralFmt(s.likes)}</span>
             <span>💬 ${viralFmt(s.comments)}</span>
