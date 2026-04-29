@@ -1009,7 +1009,13 @@ select.fs:focus{border-color:var(--pink);background:#fff}
       <h2 style="font-size:1.15rem;font-weight:800;margin:0">🇺🇸 미국 틱톡 뷰티 — 7일 내 TOP 영상</h2>
       <div style="font-size:0.85rem;opacity:0.9;margin-top:3px">10만뷰 이상만 · 따라찍기용 카탈로그</div>
     </div>
-    <div style="display:flex;gap:10px;align-items:center">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <div style="display:flex;background:rgba(255,255,255,0.18);border-radius:8px;padding:3px;gap:2px">
+        <button id="viral-sort-views" onclick="viralSetSort('views')" style="background:white;color:#1e3a8a;
+                border:none;padding:6px 12px;border-radius:6px;font-size:0.82rem;font-weight:800;cursor:pointer;white-space:nowrap">👁 조회수</button>
+        <button id="viral-sort-underdog" onclick="viralSetSort('underdog')" style="background:transparent;color:rgba(255,255,255,0.85);
+                border:none;padding:6px 12px;border-radius:6px;font-size:0.82rem;font-weight:800;cursor:pointer;white-space:nowrap">🔥 Underdog</button>
+      </div>
       <select id="viral-date-select" style="padding:7px 12px;border-radius:8px;border:none;
               font-size:0.86rem;font-weight:700;cursor:pointer">
         <option>로딩중...</option>
@@ -1942,6 +1948,7 @@ let currentMode = 'product';
 let videoHubInitialized = false;
 let viralHubInitialized = false;
 let viralAllVideos = [];
+let viralSortMode = 'views';  // 'views' = TOP 조회수, 'underdog' = 팔로워 대비 폭발력
 
 function switchMode(mode) {
   if (mode !== 'product' && mode !== 'viral') mode = 'product';
@@ -2074,12 +2081,27 @@ async function loadViralData(date) {
         const t = new Date(v.created_at).getTime();
         return !isNaN(t) && t >= cutoff;
       })
-      .sort((a,b) => (b.stats?.views||0) - (a.stats?.views||0))
-      .slice(0, 100);
+      .map(v => {
+        // Underdog ratio = 조회수 / 팔로워 (팔로워 0 인 경우 1로 처리)
+        const followers = Math.max(1, v.creator?.followers || 0);
+        v._underdog = (v.stats?.views || 0) / followers;
+        return v;
+      });
     renderViralGrid();
   } catch (e) {
     console.error('viral load error', e);
   }
+}
+
+function viralSetSort(mode) {
+  viralSortMode = mode;
+  document.getElementById('viral-sort-views').style.cssText = mode === 'views'
+    ? 'background:white;color:#1e3a8a;border:none;padding:6px 12px;border-radius:6px;font-size:0.82rem;font-weight:800;cursor:pointer;white-space:nowrap'
+    : 'background:transparent;color:rgba(255,255,255,0.85);border:none;padding:6px 12px;border-radius:6px;font-size:0.82rem;font-weight:800;cursor:pointer;white-space:nowrap';
+  document.getElementById('viral-sort-underdog').style.cssText = mode === 'underdog'
+    ? 'background:white;color:#dc2626;border:none;padding:6px 12px;border-radius:6px;font-size:0.82rem;font-weight:800;cursor:pointer;white-space:nowrap'
+    : 'background:transparent;color:rgba(255,255,255,0.85);border:none;padding:6px 12px;border-radius:6px;font-size:0.82rem;font-weight:800;cursor:pointer;white-space:nowrap';
+  renderViralGrid();
 }
 
 function renderViralGrid() {
@@ -2094,9 +2116,15 @@ function renderViralGrid() {
   }
   empty.style.display = 'none';
   grid.style.display = 'grid';
-  lbl.textContent = `TOP ${viralAllVideos.length}건`;
 
-  grid.innerHTML = viralAllVideos.map((v, i) => {
+  // 현재 정렬 모드에 따라 정렬
+  const sorted = viralAllVideos.slice().sort((a,b) => viralSortMode === 'underdog'
+    ? (b._underdog||0) - (a._underdog||0)
+    : (b.stats?.views||0) - (a.stats?.views||0)
+  ).slice(0, 100);
+  lbl.textContent = `TOP ${sorted.length}건 (${viralSortMode === 'underdog' ? '🔥 Underdog' : '👁 조회수'})`;
+
+  grid.innerHTML = sorted.map((v, i) => {
     const s = v.stats || {};
     const c = v.creator || {};
     const m = v.music || {};
@@ -2110,11 +2138,20 @@ function renderViralGrid() {
       ${coverImg}
     </div>`;
 
+    // Underdog 배지: 10배 이상이면 빨강 강조, 3배 이상이면 노랑
+    const underdog = v._underdog || 0;
+    const underdogBadge = underdog >= 10
+      ? `<div style="position:absolute;top:8px;right:8px;background:#dc2626;color:#fff;font-size:0.74rem;font-weight:900;padding:3px 8px;border-radius:5px;box-shadow:0 2px 6px rgba(0,0,0,0.3)">🔥 ${underdog.toFixed(1)}x</div>`
+      : underdog >= 3
+        ? `<div style="position:absolute;top:8px;right:8px;background:#f59e0b;color:#fff;font-size:0.74rem;font-weight:800;padding:3px 8px;border-radius:5px">⚡ ${underdog.toFixed(1)}x</div>`
+        : '';
+
     return `
       <div style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,0.06);display:flex;flex-direction:column">
         <a href="${viralEsc(v.url)}" target="_blank" style="position:relative;display:block">
           ${cover}
           <div style="position:absolute;top:8px;left:8px;background:rgba(220,38,38,0.95);color:#fff;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:0.82rem;font-weight:900">${i+1}</div>
+          ${underdogBadge}
           <div style="position:absolute;bottom:8px;left:8px;background:rgba(0,0,0,0.7);color:#fff;font-size:0.78rem;font-weight:700;padding:3px 8px;border-radius:5px">👁 ${viralFmt(s.views)}</div>
         </a>
         <div style="padding:12px 14px;display:flex;flex-direction:column;gap:6px;flex:1">
@@ -2122,6 +2159,7 @@ function renderViralGrid() {
             <a href="${viralEsc(c.url)}" target="_blank" style="color:#1e3a8a;font-weight:700;text-decoration:none">@${viralEsc(c.username)}</a>
             <span style="color:#888">${viralDaysAgo(v.created_at)}</span>
           </div>
+          <div style="font-size:0.78rem;color:#666">팔로워 ${viralFmt(c.followers||0)} · 영상이 ${underdog.toFixed(1)}배 도달</div>
           <div style="font-size:0.8rem;color:#444;display:flex;gap:10px">
             <span>❤️ ${viralFmt(s.likes)}</span>
             <span>💬 ${viralFmt(s.comments)}</span>
