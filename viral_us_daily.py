@@ -21,37 +21,46 @@ RESULTS_PER_HASHTAG = 200   # latest 정렬은 신선도 보장하지만 viral �
 RESULTS_PER_KEYWORD = 200
 TOP_N_VIDEOS  = 100            # 디지스트에 보일 영상 수 (조회수 순)
 
-# ── 해시태그 12개 (K-focused + 구매의도 + 메가트렌드 + 다양화) ──────────
+# ── 해시태그 12개 (K-direct + K-brand only) ──────────────────────────────
 US_BEAUTY_HASHTAGS = [
     # K-direct
     "koreanskincare",
+    "kbeauty",
     "glassskin",
     "porelessskin",
-    "snailmucin",            # K-ingredient 1위 (Beauty of Joseon 등)
-    "centellaskincare",      # 시카 트렌드 다양화
-    # K-trending 2026
-    "skinbarrier",
-    "skinbarrierrepair",     # 의학적 K-트렌드
-    # 구매 의도 / 신뢰
-    "tiktokmademebuyit",     # 따라찍기 직격
-    "skincareholygrail",     # 신뢰 시그널 (광고 X 보장)
-    "skincareobsessed",      # 광적 팬덤 다양화
-    # US 메가 트렌드
-    "cleangirl",             # K-skincare 미감
-    "skintok",
+    "snailmucin",
+    "centellaskincare",
+    "skinbarrierrepair",
+    # K-brand 직타 (US TikTok 폭발 중)
+    "beautyofjoseon",
+    "anua",
+    "medicube",
+    "cosrx",
+    "skin1004",
 ]
 
-# ── 키워드 9개 (영어 미국 뷰티 + 다양화) ─────────────────────────────────
+# ── 키워드 8개 (K-focused only) ──────────────────────────────────────────
 US_BEAUTY_KEYWORDS = [
-    "viral skincare",
-    "must have skincare",
-    "skincare must haves 2026",
     "korean skincare routine",
-    "pore minimizing",
-    "rice toner routine",      # 한국 라이스 토너 트렌드
-    "skin cycling",            # 2025-26 메가 트렌드
-    "underrated skincare",     # 숨겨진 보석 발굴
-    "korean glow up",          # Before/After 트렌드
+    "rice toner routine",
+    "korean glow up",
+    "beauty of joseon",
+    "anua heartleaf",
+    "snail mucin essence",
+    "korean glass skin",
+    "k-beauty review",
+]
+
+# ── K-시그널 안전망 (caption/hashtag 에 1개라도 있어야 통과) ─────────────
+K_SIGNALS = [
+    "korean", "kbeauty", "k-beauty", "k beauty",
+    "glass skin", "glassskin", "snail mucin", "snailmucin",
+    "centella", "cica", "rice toner", "ricetoner", "heartleaf",
+    "beauty of joseon", "beautyofjoseon", "anua", "medicube",
+    "cosrx", "skin1004", "laneige", "sulwhasoo", "innisfree",
+    "etude", "missha", "torriden", "klairs", "round lab", "roundlab",
+    "mediheal", "some by mi", "somebymi", "dr.melaxin", "drmelaxin",
+    "korea", "seoul",
 ]
 
 OUTPUT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -163,6 +172,11 @@ def normalize_video(item: dict, source_tag: str, region_filter: bool = True) -> 
 
         # A. 언어 필터: 영어 아니면 제외
         if lang and lang != "en":
+            return None
+
+        # A2. K-시그널 안전망: caption + hashtag 에 K-키워드 1개라도 없으면 제외
+        text_blob = ((item.get("text", "") or "") + " " + " ".join(hashtags)).lower()
+        if not any(sig in text_blob for sig in K_SIGNALS):
             return None
 
         # B. 지역 필터 (옵션): hashtag로 비-영미권 지역 시그널 있으면 제외
