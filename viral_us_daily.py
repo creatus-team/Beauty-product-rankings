@@ -16,7 +16,7 @@ ACTOR_ID    = "GdWCkxBtKWOsKjdch"
 BASE_URL    = "https://api.apify.com/v2"
 
 LOOKBACK_DAYS = 7              # 최근 7일 영상만
-MIN_VIEWS     = 100_000        # 10만 뷰 이상만 (잘된 것만)
+MIN_VIEWS     = 50_000         # 5만 뷰 이상만 (Underdog 잡기 위해 적절)
 RESULTS_PER_HASHTAG = 200   # latest 정렬은 신선도 보장하지만 viral 보장 X → 더 많이 받아 sift
 RESULTS_PER_KEYWORD = 200
 TOP_N_VIDEOS  = 100            # 디지스트에 보일 영상 수 (조회수 순)

@@ -1,6 +1,6 @@
 # 🇺🇸 미국 틱톡 뷰티 바이럴 카탈로그
 ### April 30, 2026
-7일 내 영어/미국 영상 · 10만뷰 이상 · TOP 43
+7일 내 영어/미국 영상 · 10만뷰 이상 · TOP 56
 
 ---
 
@@ -274,7 +274,7 @@
 
 ---
 
-### 28. @s_u_n_r_i_t_a_ · 13시간 전
+### 28. @s_u_n_r_i_t_a_ · 14시간 전
 ![](https://p19-common-sign.tiktokcdn-us.com/tos-alisg-p-0037/ogDEcI3tgAzQB1exRFfsdpDCAA8gjEEJOAKgAx~tplv-tiktokx-origin.image?dr=9636&x-expires=1777680000&x-signature=gmUaq2fQgG2uIjwS%2B%2F7wA5ZErU0%3D&t=4d5b0474&ps=13740610&shp=81f88b70&shcp=43f4a2f9&idc=useast5)
 **[▶ TikTok에서 보기](https://www.tiktok.com/@s_u_n_r_i_t_a_/video/7634125706871459093)**
 👁 **181.7K** · ❤️ 5.2K · 💬 14 · 🔖 1.1K
@@ -434,4 +434,134 @@
 
 ---
 
-*Generated: 2026-04-30 09:17 KST*
+### 44. @nikkidoesskincare · 6일 전
+![](https://p16-common-sign.tiktokcdn-eu.com/tos-useast5-p-0068-tx/oMoDCAAfTDHqVreqEuWQAhMHI1AjlNAIEv8ekB~tplv-tiktokx-origin.image?dr=10395&x-expires=1777680000&x-signature=K8C%2BQtXaA%2BoBikn9wHra5BhaWHo%3D&t=4d5b0474&ps=13740610&shp=81f88b70&shcp=43f4a2f9&idc=no1a)
+**[▶ TikTok에서 보기](https://www.tiktok.com/@nikkidoesskincare/video/7631925806628883725)**
+👁 **86.7K** · ❤️ 3.3K · 💬 505 · 🔖 178
+💬 let me know so ik not to buy it 🧖‍♀️🧘‍♀️#skincare #clearskin #beautytips #SkinTok #acne
+🎵 Self Aware — Temper City
+`#skincare` `#clearskin` `#beautytips` `#skintok` `#acne`
+
+---
+
+### 45. @kriziaraso · 6일 전
+![](https://p19-common-sign.tiktokcdn-us.com/tos-no1a-p-0037-no/oIBlAXveQiDApCpAE0iB7cPiIAzxwd9uCSqzkI~tplv-tiktokx-origin.image?dr=9636&x-expires=1777680000&x-signature=EN1yRWXHJ3YdJ2ZgPnDZ92ufqPs%3D&t=4d5b0474&ps=13740610&shp=81f88b70&shcp=43f4a2f9&idc=useast5)
+**[▶ TikTok에서 보기](https://www.tiktok.com/@kriziaraso/video/7632015623538838786)**
+👁 **83.6K** · ❤️ 4.1K · 💬 42 · 🔖 567
+💬 How to fix chest breakouts by repairing your damaged skin barrier 🖤✨                                                    
+🎵 som original — 𝐑𝐄𝐈𝐗𝐗𝐙𝐃𝐗 昂 ♰
+`#breakouts` `#clearskin` `#skincare` `#skinbarrier` `#axisy`
+
+---
+
+### 46. @haleysluss · 1일 전
+![](https://p19-common-sign.tiktokcdn-us.com/tos-useast8-p-0068-tx2/oYvk3DpqfAii2zkIGIvp5dAjyYZAL0HIBCIwi7~tplv-tiktokx-dmt-logom:tos-useast8-i-0068-tx2/ocBCwLvcA5aD0iAClU7BAsKAifIi3EXAIKDALo.image?dr=9634&x-expires=1777680000&x-signature=FzdQ6TQru7oVtK2v0W2BqYdOfrU%3D&t=4d5b0474&ps=13740610&shp=81f88b70&shcp=43f4a2f9&idc=useast8)
+**[▶ TikTok에서 보기](https://www.tiktok.com/@haleysluss/video/7633843878528912670)**
+👁 **75.6K** · ❤️ 5.2K · 💬 37 · 🔖 1.7K
+💬 Recently added this to my routine and i ABSOLUTELY love it & i would not recommend unless ive tried it for a while — ser
+🎵 original sound — Haley Sluss
+`#` `#anua` `#anuapdrn` `#pdrn` `#glasskin`
+
+---
+
+### 47. @kriziaraso · 7일 전
+![](https://p16-common-sign.tiktokcdn.com/tos-no1a-p-0037-no/owH6kICQD4B6MCnOgEfQATAAYFRDApFEezCRqR~tplv-tiktokx-origin.image?dr=14575&x-expires=1777680000&x-signature=c7rYhpQce7YFqS0x0hAJVgxaQOY%3D&t=4d5b0474&ps=13740610&shp=81f88b70&shcp=43f4a2f9&idc=my)
+**[▶ TikTok에서 보기](https://www.tiktok.com/@kriziaraso/video/7631576607412587778)**
+👁 **72.5K** · ❤️ 3.5K · 💬 21 · 🔖 396
+💬 Broken skin barrier vs Healed ✔️                                                                          #skincare #kor
+🎵 original sound — 𝐅  𝐘  𝐘 🕸
+`#skincare` `#koreanskincare` `#skinbarrier` `#breakouts` `#axisy`
+
+---
+
+### 48. @kglow.choi · 1일 전
+![](https://p19-common-sign.tiktokcdn-us.com/tos-useast8-p-0068-tx2/ooj8EciOAHVZ5JFwEABAIcexRApADCDEAAiOfW~tplv-tiktokx-origin.image?dr=9636&x-expires=1777680000&x-signature=JfozHkbQSS%2FQaV%2FP1XDlO5460KY%3D&t=4d5b0474&ps=13740610&shp=81f88b70&shcp=43f4a2f9&idc=useast5)
+**[▶ TikTok에서 보기](https://www.tiktok.com/@kglow.choi/video/7633616954363874591)**
+👁 **72.4K** · ❤️ 1.5K · 💬 39 · 🔖 1.3K
+💬 Honest Ratings of Viral Korean Serums by a Korean pharmacist!Products mentioned:
+🎵 ASAP by NewJeans x Tick Tack Inst. — K-Mashups 🇦🇷
+`#kbeauty` `#pdrn` `#antiaging` `#serum` `#skinbarrier`
+
+---
+
+### 49. @ejuicer.official · 1일 전
+![](https://p19-common-sign.tiktokcdn-us.com/tos-useast2a-p-0037-euttp/o4KBkJedGgfL0gHAAOLFMkj1kDeJTGGQIdglI4~tplv-tiktokx-origin.image?dr=9636&x-expires=1777680000&x-signature=di2PMdzkLy9HTw1DxBm5GUEVH88%3D&t=4d5b0474&ps=13740610&shp=81f88b70&shcp=43f4a2f9&idc=useast8)
+**[▶ TikTok에서 보기](https://www.tiktok.com/@ejuicer.official/video/7633680878685801761)**
+👁 **68.4K** · ❤️ 463 · 💬 38 · 🔖 53
+💬 Tag someone who needs this‼️ Link in comments #food #tiktokmademebuyit #mukbang #gadget #epstein
+🎵 original sound — Abdullah..
+`#food` `#tiktokmademebuyit` `#mukbang` `#gadget` `#epstein`
+
+---
+
+### 50. @ryanbuildskincare · 1일 전
+![](https://p19-common-sign.tiktokcdn-us.com/tos-useast5-p-0068-tx/oYAHGQqheoTQ8CWZz3MUEQR4k4UjQ6XAczfIew~tplv-tiktokx-origin.image?dr=9636&x-expires=1777680000&x-signature=34h1vT5ckGFcm4gzZo0VYM7vQ48%3D&t=4d5b0474&ps=13740610&shp=81f88b70&shcp=43f4a2f9&idc=useast8)
+**[▶ TikTok에서 보기](https://www.tiktok.com/@ryanbuildskincare/video/7633786429499329805)**
+👁 **65.8K** · ❤️ 6.5K · 💬 174 · 🔖 3.0K
+💬 If your ceramides are missing these ingredients, they are doing more harm than good…
+🎵 original sound — remy
+`#ryanbuildskincare` `#darkskinappreciation` `#skincaretiktok` `#ceramide` `#skincarescience`
+
+---
+
+### 51. @cherrypicks123 · 4일 전
+![](https://p16-sign-sg.tiktokcdn.com/tos-alisg-p-0037/okBFETB0AwAIIDI2AiyzvAKAtMHBei8j0KZIYC~tplv-tiktokx-origin.image?dr=14575&x-expires=1777680000&x-signature=W1EQHq2JGR%2FuQyJU7agm0KqYBis%3D&t=4d5b0474&ps=13740610&shp=81f88b70&shcp=43f4a2f9&idc=my2)
+**[▶ TikTok에서 보기](https://www.tiktok.com/@cherrypicks123/video/7632791903917903125)**
+👁 **64.6K** · ❤️ 4.7K · 💬 22 · 🔖 2.0K
+💬 Top 7 Skincare Brands & Products that’s ACTUALLY popular in Korea🇰🇷
+🎵 original sound - Cherry Picks🍒 — Cherry Picks🍒
+`#` `#` `#` `#` `#`
+
+---
+
+### 52. @notnadiajocelyn · 3일 전
+![](https://p19-sign.tiktokcdn-us.com/tos-useast5-p-0068-tx/oMmfCGvIibLVHuPeIAldjkTzXHjn3Ae6IQgCEg~tplv-tiktokx-origin.image?dr=14575&x-expires=1777680000&x-signature=ImYY3y%2FQZBW6Jqp8EFJ0VZGN9Qs%3D&t=4d5b0474&ps=13740610&shp=81f88b70&shcp=43f4a2f9&idc=my3)
+**[▶ TikTok에서 보기](https://www.tiktok.com/@notnadiajocelyn/video/7633231397980835085)**
+👁 **62.6K** · ❤️ 4.2K · 💬 27 · 🔖 436
+💬 my skin holy grails 🤏🏽 #nadiaj #fyp
+🎵 original sound — Nadia J
+`#nadiaj` `#fyp` `#` `#` `#`
+
+---
+
+### 53. @krystallee2222 · 4일 전
+![](https://p16-common-sign.tiktokcdn.com/tos-useast8-p-0068-tx2/ogbexAqDTEL1eKsFEAAFtAE7II0sf27APjI4DO~tplv-tiktokx-origin.image?dr=14575&x-expires=1777680000&x-signature=wtZZvy4UQAHfhb0E59oo1dAKvnI%3D&t=4d5b0474&ps=13740610&shp=81f88b70&shcp=43f4a2f9&idc=my3)
+**[▶ TikTok에서 보기](https://www.tiktok.com/@krystallee2222/video/7632527699436752159)**
+👁 **62.5K** · ❤️ 5.2K · 💬 85 · 🔖 2.4K
+💬 Replying to @🍷麦努纳🍷 how to make your pores *invisible* using egg white mask
+🎵 original sound — Krystal Lee
+`#` `#eggwhitemask` `#poremask` `#kbeauty` `#koreanskincare`
+
+---
+
+### 54. @katiemortkaa · 6시간 전
+![](https://p16-common-sign.tiktokcdn-us.com/tos-useast8-p-0068-tx2/octBiBH3SE9y2XQyICvUifkNVSeDpIA6MEoRAE~tplv-tiktokx-origin.image?dr=9636&x-expires=1777680000&x-signature=BcXA7TcEiWZv%2BC07RwqYXBYQZvw%3D&t=4d5b0474&ps=13740610&shp=81f88b70&shcp=43f4a2f9&idc=useast5)
+**[▶ TikTok에서 보기](https://www.tiktok.com/@katiemortkaa/video/7634244831056858398)**
+👁 **58.7K** · ❤️ 3.6K · 💬 32 · 🔖 405
+💬 The BEST cream for dehydrated skin! The 🔑 to a healthy glow is a healthy skin barrier!! Link in my bio so you can get yo
+🎵 original sound — Katie Mortka
+`#` `#glassskin` `#antiaging` `#koreanskincare` `#anuapdrn`
+
+---
+
+### 55. @mysistersskin · 20시간 전
+![](https://p19-common-sign.tiktokcdn-us.com/tos-useast5-p-0068-tx/oA3oQSEDqAfDyqONFpYjEdaQoAF7rRA8jRBBeg~tplv-tiktokx-origin.image?dr=9636&x-expires=1777680000&x-signature=C5Z%2F%2BSamBPF%2FX%2BktTRfWx60rzXQ%3D&t=4d5b0474&ps=13740610&shp=81f88b70&shcp=43f4a2f9&idc=useast5)
+**[▶ TikTok에서 보기](https://www.tiktok.com/@mysistersskin/video/7634035857535667470)**
+👁 **56.1K** · ❤️ 2.5K · 💬 88 · 🔖 1.8K
+💬 This is your step by step Korean Skincare morning routine.  We are at Sokit @Sokit Beauty in the beverly center in LA, o
+🎵 original sound — Gina & Marissa
+`#` `#` `#` `#` `#`
+
+---
+
+### 56. @k_pharmacist · 6일 전
+![](https://p16-common-sign.tiktokcdn-eu.com/tos-useast5-p-0068-tx/oICYAsm6MFDAfEbAEpEDjDfFIApIgATiDSp6VR~tplv-tiktokx-origin.image?dr=10395&x-expires=1777680000&x-signature=EpW5it%2BMuqR5cmOhOV7e%2FoZs1fU%3D&t=4d5b0474&ps=13740610&shp=81f88b70&shcp=43f4a2f9&idc=no1a)
+**[▶ TikTok에서 보기](https://www.tiktok.com/@k_pharmacist/video/7631824495128497422)**
+👁 **54.3K** · ❤️ 1.4K · 💬 21 · 🔖 641
+💬 Barrier creams are everywhere right now…😆
+🎵 original sound - Yoon&Chan_Kpharmacist — Yoon&Chan_Kpharmacist
+`#barrierrepair` `#beautyofjoseon` `#aesturaatobarriercream` `#ceramide` `#oilyskin`
+
+---
+
+*Generated: 2026-04-30 09:38 KST*
