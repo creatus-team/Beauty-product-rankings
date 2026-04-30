@@ -349,7 +349,9 @@ def main():
         print("ERROR: APIFY_TOKEN not set")
         return
 
-    videos = scrape_all(region_filter=True)
+    # region_filter=False 로 시작 — fallback 시 비용 2배 나는 문제 회피
+    # 영어 필터만으로도 USA/UK 영상 거의 다 잡힘 (지역 필터 너무 엄격해서 50개 못 채우고 재실행함)
+    videos = scrape_all(region_filter=False)
 
     if not videos:
         print("\nNo videos collected.")
