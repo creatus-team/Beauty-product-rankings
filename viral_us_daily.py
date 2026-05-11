@@ -220,13 +220,14 @@ BATCH_SIZE = 2
 
 
 def _collect_batch(run_queue, all_videos: dict, region_filter: bool) -> None:
+    """MIN_VIEWS 필터는 main() 에서 fallback 과 함께 적용 — 여기선 lang/region/K-필터만."""
     for run_id, label, source_tag in run_queue:
         try:
             print(f"  Waiting on {label} ({run_id})...")
             run_data   = wait_for_run(run_id)
             dataset_id = run_data["defaultDatasetId"]
             items      = fetch_dataset(dataset_id)
-            added, skipped_views, skipped_filter = 0, 0, 0
+            added, skipped_filter = 0, 0
             for item in items:
                 v = normalize_video(item, source_tag, region_filter=region_filter)
                 if not v:
@@ -234,15 +235,12 @@ def _collect_batch(run_queue, all_videos: dict, region_filter: bool) -> None:
                     continue
                 if not v["id"]:
                     continue
-                if v["stats"]["views"] < MIN_VIEWS:
-                    skipped_views += 1
-                    continue
                 vid_id = v["id"]
                 if vid_id not in all_videos or v["stats"]["views"] > all_videos[vid_id]["stats"]["views"]:
                     all_videos[vid_id] = v
                     added += 1
             print(f"  {label}: {len(items)} fetched, {added} kept, "
-                  f"{skipped_views} skip-views, {skipped_filter} skip-lang/region")
+                  f"{skipped_filter} skip-lang/region/K")
         except Exception as e:
             print(f"  WARNING: Failed to collect {label}: {e}")
 
@@ -365,13 +363,26 @@ def main():
 
     # region_filter=False 로 시작 — fallback 시 비용 2배 나는 문제 회피
     # 영어 필터만으로도 USA/UK 영상 거의 다 잡힘 (지역 필터 너무 엄격해서 50개 못 채우고 재실행함)
-    videos = scrape_all(region_filter=False)
+    all_candidates = scrape_all(region_filter=False)
 
-    if not videos:
-        print("\nNo videos collected.")
+    if not all_candidates:
+        print("\nNo videos collected at all (Apify 모두 실패).")
         return
 
-    print(f"\n[Final] Building digest from {len(videos)} videos...")
+    # ── MIN_VIEWS 자동 fallback: 통과량 < 30 이면 임계 낮춤 ───────────
+    # GH Actions runner IP 차단으로 일부 runs 실패하면 후보 적음 → 무조건 결과 저장 보장
+    TARGET_MIN = 30
+    THRESHOLDS = [MIN_VIEWS, 30_000, 20_000, 10_000, 5_000, 0]
+    videos = []
+    chosen_threshold = MIN_VIEWS
+    for thresh in THRESHOLDS:
+        videos = [v for v in all_candidates if v["stats"]["views"] >= thresh]
+        if len(videos) >= TARGET_MIN or thresh == 0:
+            chosen_threshold = thresh
+            break
+        print(f"  [Fallback] MIN_VIEWS={thresh:,} → {len(videos)} 개 (목표 {TARGET_MIN}+), 임계 더 낮춤")
+
+    print(f"\n[Final] Using MIN_VIEWS={chosen_threshold:,}: {len(videos)} videos")
     digest = build_digest(videos)
 
     date_str  = datetime.now().strftime("%Y-%m-%d")
